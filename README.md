@@ -32,6 +32,21 @@ make up
 make test
 ```
 
+Or drive a single scenario through the orchestrator and persist results to `runs.db`:
+
+```bash
+python -m runner.orchestrate --scenario smoke --token <cashu-token>
+# or
+make orchestrate SCENARIO=smoke TOKEN=cashuA...
+```
+
+Useful env flags:
+
+- `SKIP_SYNC=1` — skip `scripts/sync.sh`
+- `KEEP_UP=1` — leave compose services running after the run for debugging
+
+The orchestrator writes one row to `runs` and one row per test to `test_results` in `runs.db` (SQLite via SQLModel). Logs land in `logs/<run-timestamp>/`.
+
 ### 5. View logs
 
 ```bash
@@ -65,8 +80,16 @@ vendor/           # auto-populated by make sync (gitignored)
   COMMITS.txt     # pinned commit SHAs
 scripts/
   sync.sh         # vendor sync script
-tests/            # e2e test scripts
+runner/           # scenario-driven orchestrator
+  orchestrate.py  # CLI entrypoint
+  models.py       # SQLModel schema (scenarios, runs, test_results)
+  scenario.py     # YAML loader
+  junit.py        # junit XML parser
+  compose.py      # docker compose wrappers
+scenarios/        # YAML scenario library (smoke.yaml, ...)
+tests/            # pytest suite driven by the orchestrator
 compose.yml
 Makefile
+pyproject.toml    # runner dependencies (sqlmodel, pyyaml, pytest, ...)
 .env.example
 ```

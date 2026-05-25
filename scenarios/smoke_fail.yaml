@@ -1,0 +1,12 @@
+id: smoke_fail
+name: Orchestrator failure smoke
+description: >
+  Negative-path scenario — drives a deliberately failing test so we can
+  prove the orchestrator records failed/error outcomes correctly. Not
+  meant for normal use.
+services_required: false
+selection:
+  paths: [tests/test_smoke_fail.py]
+parameters: {}
+expected_cost_sats: 0
+timeout_seconds: 60

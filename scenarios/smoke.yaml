@@ -1,0 +1,12 @@
+id: smoke
+name: Orchestrator smoke
+description: >
+  Trivial scenario that proves the orchestrator can drive pytest, parse
+  results, and persist them to runs.db. Does not require any services.
+services_required: false
+selection:
+  paths: [tests/test_smoke.py]
+  markers: []
+parameters: {}
+expected_cost_sats: 0
+timeout_seconds: 60
