@@ -1,13 +1,43 @@
-.PHONY: sync up down test logs orchestrate smoke
+.PHONY: sync up down test logs orchestrate smoke dump-logs
+
+E2E_TIMEOUT ?= 60
 
 sync:
 	@bash scripts/sync.sh
 
-up:
-	docker compose up -d
+up: sync
+	@echo "Building and starting 6-service e2e topology..."
+	docker compose up -d --build
+	@echo "Waiting for relay..."
+	@bash scripts/wait_for.sh relay    http://localhost:7777 $(E2E_TIMEOUT)
+	@echo "Waiting for mock-openai..."
+	@bash scripts/wait_for.sh mock-openai http://localhost:8082/v1/models $(E2E_TIMEOUT)
+	@echo "Waiting for node-a..."
+	@bash scripts/wait_for.sh node-a   http://localhost:8001/v1/info $(E2E_TIMEOUT)
+	@echo "Waiting for node-b..."
+	@bash scripts/wait_for.sh node-b   http://localhost:8002/v1/info $(E2E_TIMEOUT)
+	@echo "Waiting for routstrd..."
+	@bash scripts/wait_for.sh routstrd http://localhost:8008/health $(E2E_TIMEOUT)
+	@echo ""
+	@echo "All services healthy."
+	@echo "  relay:      ws://localhost:7777"
+	@echo "  mock-openai: http://localhost:8082"
+	@echo "  node-a:     http://localhost:8001"
+	@echo "  node-b:     http://localhost:8002"
+	@echo "  routstrd:   http://localhost:8008"
+	@echo ""
+	@echo "Providers seen by routstrd:"
+	@curl -sf http://localhost:8008/providers | python3 -c "import sys,json; d=json.load(sys.stdin); [print('  -', p['baseUrl']) for p in d.get('providers',[])]" 2>/dev/null || echo "  (none yet — discovery may still be in progress)"
+	@echo ""
+	@echo "CLI runner ready: docker compose exec cli-runner routstr --help"
 
 down:
-	docker compose down
+	@echo "Stopping topology and removing volumes..."
+	docker compose down -v
+	@echo "Done."
+
+dump-logs:
+	@bash scripts/dump_logs.sh
 
 test:
 	docker compose run --rm cli-runner bash -c "cd /tests && bash run.sh"
