@@ -1,0 +1,5 @@
+vendor/
+runs.db
+logs/
+webui/node_modules/
+.env

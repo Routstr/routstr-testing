@@ -1,0 +1,62 @@
+version: "3.9"
+
+services:
+  relay:
+    image: scsibug/nostr-rs-relay:latest
+    ports:
+      - "7777:7777"
+    volumes:
+      - relay-data:/usr/src/app/db
+    restart: unless-stopped
+
+  mock-openai:
+    image: wiremock/wiremock:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./mock-openai:/home/wiremock
+    restart: unless-stopped
+
+  node-a:
+    build:
+      context: vendor/routstr-core
+    environment:
+      - RELAY_URL=ws://relay:7777
+    depends_on:
+      - relay
+    restart: unless-stopped
+
+  node-b:
+    build:
+      context: vendor/routstr-core
+    environment:
+      - RELAY_URL=ws://relay:7777
+    depends_on:
+      - relay
+    restart: unless-stopped
+
+  routstrd:
+    build:
+      context: vendor/routstrd
+    environment:
+      - RELAY_URL=ws://relay:7777
+      - OPENAI_BASE_URL=http://mock-openai:8080/v1
+    depends_on:
+      - relay
+      - mock-openai
+    restart: unless-stopped
+
+  cli-runner:
+    build:
+      context: vendor/routstr-cli
+    environment:
+      - RELAY_URL=ws://relay:7777
+      - E2E_CASHU_TOKEN=${E2E_CASHU_TOKEN:-}
+    depends_on:
+      - routstrd
+    volumes:
+      - ./tests:/tests
+    command: ["sleep", "infinity"]
+
+volumes:
+  relay-data:
