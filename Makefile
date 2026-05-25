@@ -1,4 +1,4 @@
-.PHONY: sync up down test logs orchestrate smoke dump-logs
+.PHONY: sync up down test logs orchestrate smoke dump-logs server server-test
 
 E2E_TIMEOUT ?= 60
 
@@ -53,3 +53,12 @@ orchestrate:
 # Quick acceptance check: run the smoke scenario with sync skipped (no docker required).
 smoke:
 	SKIP_SYNC=1 python -m runner.orchestrate --scenario smoke --token "$(or $(TOKEN),placeholder)"
+
+# Launch the FastAPI backend that the React UI (ROU-135) consumes.
+# Override host/port at the CLI:  make server HOST=0.0.0.0 PORT=8000
+server:
+	uvicorn server.main:app --reload --host $(or $(HOST),127.0.0.1) --port $(or $(PORT),8000)
+
+# Run only the server test suite (fast — no docker, no real subprocess).
+server-test:
+	python -m pytest tests/test_server_scenarios.py tests/test_server_runs.py tests/test_server_token_hygiene.py -v
