@@ -40,6 +40,7 @@ services:
       - UPSTREAM_BASE_URL=http://mock-openai:3000
       - UPSTREAM_API_KEY=test-key
       - CASHU_MINTS=${CASHU_MINTS:-https://testnut.cashu.space}
+      - ADMIN_PASSWORD=${NODE_A_ADMIN_PASSWORD:-test-admin-pw}
       - NAME=NodeA
       - DESCRIPTION=Test node A
       - NPUB=${NODE_A_NPUB:-npub10xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqpkge6d}
