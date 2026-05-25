@@ -10,7 +10,7 @@ services:
       - relay-data:/usr/src/app/db
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "sh", "-c", "wget -qO- http://localhost:8080/ >/dev/null 2>&1 || exit 1"]
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/localhost/8080"]
       interval: 5s
       timeout: 3s
       retries: 12
@@ -18,10 +18,10 @@ services:
   mock-openai:
     image: zerob13/mock-openai-api
     ports:
-      - "8082:3000"
+      - "8083:3000"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/v1/models"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/v1/models"]
       interval: 5s
       timeout: 3s
       retries: 12
@@ -36,14 +36,14 @@ services:
       - "8001:8000"
     environment:
       - DATABASE_URL=sqlite+aiosqlite:////data/node-a.db
-      - NOSTR_RELAY_URL=ws://relay:8080
+      - RELAYS=ws://relay:8080
       - UPSTREAM_BASE_URL=http://mock-openai:3000
       - UPSTREAM_API_KEY=test-key
       - CASHU_MINTS=${CASHU_MINTS:-https://testnut.cashu.space}
       - NAME=NodeA
       - DESCRIPTION=Test node A
-      - NPUB=${NODE_A_NPUB:-npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqnodeaaa}
-      - NSEC=${NODE_A_NSEC:-nsec1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqnodeaaaa}
+      - NPUB=${NODE_A_NPUB:-npub10xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqpkge6d}
+      - NSEC=${NODE_A_NSEC:-nsec1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsmhltgl}
       - HTTP_URL=http://node-a:8000
       - CORS_ORIGINS=*
       - FIXED_COST_PER_REQUEST=1
@@ -62,7 +62,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8000/v1/info"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/v1/info"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -76,14 +76,14 @@ services:
       - "8002:8000"
     environment:
       - DATABASE_URL=sqlite+aiosqlite:////data/node-b.db
-      - NOSTR_RELAY_URL=ws://relay:8080
+      - RELAYS=ws://relay:8080
       - UPSTREAM_BASE_URL=http://mock-openai:3000
       - UPSTREAM_API_KEY=test-key
       - CASHU_MINTS=${CASHU_MINTS:-https://testnut.cashu.space}
       - NAME=NodeB
       - DESCRIPTION=Test node B
-      - NPUB=${NODE_B_NPUB:-npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqnodebbb}
-      - NSEC=${NODE_B_NSEC:-nsec1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqnodebbbbb}
+      - NPUB=${NODE_B_NPUB:-npub1ccz8l9zpa47k6vz9gphftsrumpw80rjt3nhnefat4symjhrsnmjs38mnyd}
+      - NSEC=${NODE_B_NSEC:-nsec1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqpqptcfk2}
       - HTTP_URL=http://node-b:8000
       - CORS_ORIGINS=*
       - FIXED_COST_PER_REQUEST=2
@@ -102,7 +102,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8000/v1/info"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/v1/info"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -115,7 +115,7 @@ services:
       context: vendor/routstrd
       dockerfile: Dockerfile
     ports:
-      - "8008:8008"
+      - "8091:8008"
     environment:
       - RELAY_URL=ws://relay:8080
     command:
@@ -131,7 +131,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8008/health"]
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/8008"]
       interval: 5s
       timeout: 5s
       retries: 24
