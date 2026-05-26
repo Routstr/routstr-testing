@@ -30,6 +30,7 @@ from typing import Any
 
 from sqlmodel import select
 
+from .balance import fetch_total_sats as fetch_routstrd_total_sats
 from .compose import dump_logs as compose_dump_logs
 from .compose import down as compose_down
 from .compose import up as compose_up
@@ -258,6 +259,8 @@ def orchestrate(
     overall_status = "passed"
     error_message: str | None = None
     teardown_logs_needed = False
+    balance_before: int | None = None
+    balance_after: int | None = None
 
     try:
         ok, output = _run_sync()
@@ -302,6 +305,10 @@ def orchestrate(
                 token_ok = False
                 _log("topup failed — continuing; funded tests will be flagged")
 
+        if scenario.services_required:
+            balance_before = fetch_routstrd_total_sats()
+            _log(f"routstrd balance before pytest: {balance_before}")
+
         junit_path = artifacts_dir / "junit.xml"
         scenario_env = scenario.env()
         if not token_ok:
@@ -313,12 +320,18 @@ def orchestrate(
             (artifacts_dir / "pytest.log").write_text(
                 f"timeout after {scenario.timeout_seconds}s\n{exc}"
             )
+            if scenario.services_required:
+                balance_after = fetch_routstrd_total_sats()
             overall_status = "error"
             error_message = f"pytest timed out after {scenario.timeout_seconds}s"
             teardown_logs_needed = True
             return run_id
 
         (artifacts_dir / "pytest.log").write_text(output)
+
+        if scenario.services_required:
+            balance_after = fetch_routstrd_total_sats()
+            _log(f"routstrd balance after pytest: {balance_after}")
 
         parsed = parse_junit(junit_path)
         _insert_test_results(engine, run_id, parsed)
@@ -358,15 +371,22 @@ def orchestrate(
             except Exception as exc:
                 _log(f"compose down failed: {exc!r}")
 
+        token_consumed_sats = 0
+        if balance_before is not None and balance_after is not None:
+            token_consumed_sats = max(0, balance_before - balance_after)
+
         _finalize_run(
             engine,
             run_id=run_id,
             status=overall_status,
             vendor_commits=vendor_commits,
             error_message=error_message,
+            token_consumed_sats=token_consumed_sats,
         )
         _log(
-            f"run #{run_id} status={overall_status} commits={list(vendor_commits)}"
+            f"run #{run_id} status={overall_status} "
+            f"consumed_sats={token_consumed_sats} "
+            f"commits={list(vendor_commits)}"
         )
 
     return run_id

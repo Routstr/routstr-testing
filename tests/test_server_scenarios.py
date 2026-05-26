@@ -60,7 +60,16 @@ def test_list_after_seed(client):
     r = c.get("/api/scenarios")
     assert r.status_code == 200
     payload = r.json()
-    assert payload == [{"id": "smoke", "name": "Smoke", "description": "a test"}]
+    assert len(payload) == 1
+    item = payload[0]
+    assert item["id"] == "smoke"
+    assert item["name"] == "Smoke"
+    assert item["description"] == "a test"
+    # ROU-138: telemetry fields default to zeros for a never-run scenario.
+    assert item["expected_cost_sats"] == 0
+    assert item["stats"]["runs_count"] == 0
+    assert item["stats"]["avg_consumed_sats"] == 0
+    assert item["stats"]["last_consumed_sats"] is None
 
 
 def test_get_detail(client):
@@ -140,3 +149,87 @@ def test_delete(client):
 def test_delete_missing_returns_404(client):
     c, _ = client
     assert c.delete("/api/scenarios/nope").status_code == 404
+
+
+# ─── ROU-138: token-budget telemetry on scenarios ──────────────────────────
+
+
+def _seed_run(engine, *, scenario_id: str, consumed: int, status_: str = "passed"):
+    from datetime import datetime
+
+    from runner.models import Run, get_session
+
+    with get_session(engine) as session:
+        row = Run(
+            scenario_id=scenario_id,
+            started_at=datetime.utcnow(),
+            finished_at=datetime.utcnow(),
+            status=status_,
+            token_consumed_sats=consumed,
+        )
+        session.add(row)
+        session.commit()
+
+
+def test_list_includes_expected_cost_sats_from_yaml(client):
+    c, cfg = client
+    _seed(
+        cfg.scenarios_dir,
+        "paid",
+        "id: paid\nname: Paid\nexpected_cost_sats: 1500\n",
+    )
+    payload = c.get("/api/scenarios").json()
+    assert payload[0]["expected_cost_sats"] == 1500
+
+
+def test_scenario_stats_reflect_three_runs_average(app_factory):
+    """ROU-138 acceptance: after three runs of the same scenario, the
+    Scenarios listing shows the historical average consumed sats."""
+    app, cfg = app_factory()
+    _seed(
+        cfg.scenarios_dir,
+        "golden",
+        "id: golden\nname: Golden\nexpected_cost_sats: 500\n",
+    )
+    engine = app.state.engine
+    _seed_run(engine, scenario_id="golden", consumed=300)
+    _seed_run(engine, scenario_id="golden", consumed=600)
+    _seed_run(engine, scenario_id="golden", consumed=900)
+
+    c = TestClient(app)
+    payload = c.get("/api/scenarios").json()
+    item = next(x for x in payload if x["id"] == "golden")
+    assert item["stats"]["runs_count"] == 3
+    assert item["stats"]["avg_consumed_sats"] == 600  # (300+600+900) / 3
+    assert item["stats"]["last_consumed_sats"] == 900  # most-recent finished_at
+    assert item["expected_cost_sats"] == 500
+
+
+def test_scenario_stats_segregate_by_scenario_id(app_factory):
+    app, cfg = app_factory()
+    _seed(cfg.scenarios_dir, "alpha", "id: alpha\nname: Alpha\n")
+    _seed(cfg.scenarios_dir, "beta", "id: beta\nname: Beta\n")
+    _seed_run(app.state.engine, scenario_id="alpha", consumed=100)
+    _seed_run(app.state.engine, scenario_id="alpha", consumed=200)
+    _seed_run(app.state.engine, scenario_id="beta", consumed=999)
+
+    c = TestClient(app)
+    payload = {x["id"]: x for x in c.get("/api/scenarios").json()}
+    assert payload["alpha"]["stats"]["runs_count"] == 2
+    assert payload["alpha"]["stats"]["avg_consumed_sats"] == 150
+    assert payload["beta"]["stats"]["runs_count"] == 1
+    assert payload["beta"]["stats"]["avg_consumed_sats"] == 999
+
+
+def test_scenario_detail_includes_stats(app_factory):
+    app, cfg = app_factory()
+    _seed(cfg.scenarios_dir, "solo", "id: solo\nname: Solo\nexpected_cost_sats: 42\n")
+    _seed_run(app.state.engine, scenario_id="solo", consumed=10)
+    _seed_run(app.state.engine, scenario_id="solo", consumed=30)
+
+    c = TestClient(app)
+    payload = c.get("/api/scenarios/solo").json()
+    assert payload["expected_cost_sats"] == 42
+    assert payload["stats"]["runs_count"] == 2
+    assert payload["stats"]["avg_consumed_sats"] == 20
+    assert payload["stats"]["last_consumed_sats"] == 30

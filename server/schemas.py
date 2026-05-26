@@ -13,15 +13,36 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
+class ScenarioStats(BaseModel):
+    runs_count: int = 0
+    avg_consumed_sats: int = 0
+    last_consumed_sats: Optional[int] = None
+
+
 class ScenarioSummary(BaseModel):
     id: str
     name: str
     description: str = ""
+    expected_cost_sats: int = 0
+    stats: ScenarioStats = Field(default_factory=ScenarioStats)
 
 
 class ScenarioDetail(ScenarioSummary):
     yaml: str
     updated_at: Optional[datetime] = None
+
+
+class BalanceEstimate(BaseModel):
+    """Best-effort routstrd balance snapshot for the UI's run-modal warning.
+
+    `total_sats` is None when routstrd is unreachable — the UI should
+    surface "balance unknown" rather than block the user from running.
+    """
+
+    total_sats: Optional[int] = None
+    source: str  # "routstrd" | "unavailable"
+    fetched_at: datetime
+    detail: Optional[str] = None
 
 
 class ScenarioCreate(BaseModel):

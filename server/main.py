@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from runner.models import get_engine
 
+from .balance import router as balance_router
 from .config import ServerConfig
 from .runs import router as runs_router
 from .runs import spawn_orchestrator
@@ -46,12 +47,14 @@ def _install_redaction() -> None:
 def create_app(
     config: Optional[ServerConfig] = None,
     orchestrate_runner: Optional[Callable] = None,
+    balance_fetcher: Optional[Callable] = None,
 ) -> FastAPI:
     config = config or ServerConfig.from_env()
     app = FastAPI(title="routstr-testing", version="0.1.0")
     app.state.config = config
     app.state.engine = get_engine(config.db_path)
     app.state.orchestrate_runner = orchestrate_runner or spawn_orchestrator
+    app.state.balance_fetcher = balance_fetcher
 
     app.add_middleware(
         CORSMiddleware,
@@ -63,6 +66,7 @@ def create_app(
 
     app.include_router(scenarios_router)
     app.include_router(runs_router)
+    app.include_router(balance_router)
 
     @app.get("/api/health")
     def health() -> dict[str, str]:

@@ -61,4 +61,11 @@ server:
 
 # Run only the server test suite (fast — no docker, no real subprocess).
 server-test:
-	python -m pytest tests/test_server_scenarios.py tests/test_server_runs.py tests/test_server_token_hygiene.py -v
+	python -m pytest \
+	  tests/test_server_scenarios.py \
+	  tests/test_server_runs.py \
+	  tests/test_server_token_hygiene.py \
+	  tests/test_server_balance.py \
+	  tests/test_runner_balance.py \
+	  tests/test_orchestrate_balance.py \
+	  -v

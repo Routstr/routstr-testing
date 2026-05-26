@@ -23,6 +23,7 @@ class ServerConfig:
     compose_file: Path
     orchestrate_cmd: list[str]
     cors_origins: list[str]
+    routstrd_url: str = "http://localhost:8091"
 
     @classmethod
     def from_env(cls) -> "ServerConfig":
@@ -45,4 +46,7 @@ class ServerConfig:
                 ).split(",")
                 if o.strip()
             ],
+            routstrd_url=os.environ.get(
+                "ROUTSTRD_URL", "http://localhost:8091"
+            ).rstrip("/"),
         )
