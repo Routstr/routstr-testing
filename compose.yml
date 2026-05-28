@@ -138,6 +138,25 @@ services:
       retries: 24
       start_period: 30s
 
+  # ── Web UI (Vite + React) ─────────────────────────────────────────────────
+  #
+  # The FastAPI backend (`server/`) is not part of the compose stack — it
+  # runs on the host (`uvicorn server.main:app --port 8000`). The webui
+  # container reaches it through host.docker.internal, which Docker maps
+  # to the host's gateway via the explicit extra_hosts entry below.
+
+  webui:
+    build:
+      context: ./webui
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_BASE_URL=${VITE_API_BASE_URL:-http://host.docker.internal:8000}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
   # ── CLI runner (long-lived for docker exec) ───────────────────────────────
 
   cli-runner:

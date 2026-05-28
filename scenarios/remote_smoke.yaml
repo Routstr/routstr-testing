@@ -1,0 +1,20 @@
+id: remote_smoke
+name: Remote-node safe smoke
+description: >
+  Exercises a deployed routstr node over the safe (read-only) subset of
+  routstr-core's tests. Runs against URLs supplied via
+  --remote-node-urls (or REMOTE_NODE_URLS env). Pair with
+  --target-profile remote. Selects `safe_for_remote`-tagged tests under
+  the vendored routstr-core repo so the harness covers the deployment
+  contract, not just the orchestrator self-test.
+services_required: false
+target_profile: remote
+selection:
+  paths:
+    - vendor/routstr-core/tests/core
+    - vendor/routstr-core/tests/daemon
+  markers:
+    - safe_for_remote
+parameters: {}
+expected_cost_sats: 0
+timeout_seconds: 300
