@@ -76,6 +76,7 @@ def _cmd_id(path: tuple[str, ...]) -> str:
 # ── tests ─────────────────────────────────────────────────────────────────────
 
 
+@pytest.mark.safe_for_remote
 class TestHelpSmoke:
     """Every leaf command exposes a --help that exits 0.
 
@@ -95,6 +96,7 @@ class TestHelpSmoke:
         assert result.stdout.strip(), "Expected --help output but got nothing"
 
 
+@pytest.mark.safe_for_remote
 class TestNoAuthHappyPath:
     """Happy-path tests for commands that need no admin token."""
 
@@ -114,6 +116,8 @@ class TestNoAuthHappyPath:
         )
 
 
+@pytest.mark.admin_required
+@pytest.mark.destructive
 class TestAdminHappyPath:
     """Happy-path tests for admin-gated commands.
 
@@ -223,6 +227,7 @@ class TestAdminHappyPath:
         assert result.returncode != 0, "Expected non-zero exit on invalid token"
 
 
+@pytest.mark.safe_for_remote
 class TestFailurePaths:
     """Every leaf command handles bad input / offline node with non-zero exit.
 

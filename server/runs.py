@@ -50,6 +50,18 @@ def _orchestrate_runner(request: Request):
     return request.app.state.orchestrate_runner
 
 
+def _decode_remote_urls(raw: Optional[str]) -> Optional[list[str]]:
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(value, list):
+        return [str(v) for v in value if v]
+    return None
+
+
 def _to_summary(row: Run) -> RunSummary:
     return RunSummary(
         id=row.id or 0,
@@ -58,6 +70,8 @@ def _to_summary(row: Run) -> RunSummary:
         started_at=row.started_at,
         finished_at=row.finished_at,
         token_consumed_sats=row.token_consumed_sats,
+        target_profile=row.target_profile or "local",
+        remote_node_urls=_decode_remote_urls(row.remote_node_urls_json),
     )
 
 
@@ -73,6 +87,8 @@ def _to_detail(row: Run, test_rows: list[TestResult]) -> RunDetail:
         started_at=row.started_at,
         finished_at=row.finished_at,
         token_consumed_sats=row.token_consumed_sats,
+        target_profile=row.target_profile or "local",
+        remote_node_urls=_decode_remote_urls(row.remote_node_urls_json),
         artifacts_dir=row.artifacts_dir,
         vendor_commits=commits,
         error_message=row.error_message,
@@ -95,6 +111,7 @@ def list_runs(
     status_filter: Optional[str] = Query(default=None, alias="status"),
     scenario_id: Optional[str] = Query(default=None),
     since: Optional[datetime] = Query(default=None),
+    target_profile: Optional[str] = Query(default=None),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> list[RunSummary]:
@@ -107,6 +124,8 @@ def list_runs(
             stmt = stmt.where(Run.scenario_id == scenario_id)
         if since:
             stmt = stmt.where(Run.started_at >= since)
+        if target_profile:
+            stmt = stmt.where(Run.target_profile == target_profile)
         stmt = stmt.order_by(desc(Run.id)).offset(offset).limit(limit)
         rows = session.exec(stmt).all()
     return [_to_summary(r) for r in rows]
@@ -136,12 +155,33 @@ def create_run(body: RunCreate, request: Request) -> RunCreated:
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"scenario {body.scenario_id!r} not found",
         )
+
+    target_profile = (body.target_profile or "").strip().lower() or None
+    if target_profile and target_profile not in {"local", "remote"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"unknown target_profile {body.target_profile!r}; expected local|remote",
+        )
+    remote_urls = [u.strip() for u in (body.remote_node_urls or []) if u.strip()]
+    if target_profile == "remote" and not remote_urls:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "target_profile=remote requires at least one remote_node_urls "
+                "entry — refusing to fall back to the local compose stack."
+            ),
+        )
+    remote_admin_tokens = list(body.remote_admin_tokens or [])
+
     runner_fn = _orchestrate_runner(request)
     try:
         run_id = runner_fn(
             scenario_id=body.scenario_id,
             token=body.cashu_token,
             config=config,
+            target_profile=target_profile,
+            remote_node_urls=remote_urls or None,
+            remote_admin_tokens=remote_admin_tokens or None,
         )
     except OrchestratorError as exc:
         raise HTTPException(
@@ -210,17 +250,22 @@ class OrchestratorError(RuntimeError):
     """Raised when the orchestrator subprocess fails to spawn or report a run id."""
 
 
-def spawn_orchestrator(*, scenario_id: str, token: str, config) -> int:
+def spawn_orchestrator(
+    *,
+    scenario_id: str,
+    token: str,
+    config,
+    target_profile: Optional[str] = None,
+    remote_node_urls: Optional[list[str]] = None,
+    remote_admin_tokens: Optional[list[str]] = None,
+) -> int:
     """Run the orchestrator and return the run id it inserted.
 
-    The token is passed via E2E_CASHU_TOKEN, never argv. We capture stdout
-    to read the `{run_id, db}` summary the orchestrator prints on exit;
-    that capture is discarded after parsing so the token (if it ever leaked
-    into output) does not survive in any handler.
-
-    We forward --db / --scenarios-dir / --compose-file from the server
-    config so the orchestrator writes the new run row to the same SQLite
-    file the server reads from.
+    The cashu token is passed via E2E_CASHU_TOKEN, never argv. Per-node
+    admin tokens (ROU-151) are passed via REMOTE_NODE_ADMIN_TOKEN_<i> env
+    vars — never argv, never persisted to runs.db. The remote node URLs
+    DO go on argv since they're not secret (they end up in the runs.db
+    row so the UI can show what was tested).
     """
     cmd = list(config.orchestrate_cmd) + [
         "--scenario",
@@ -232,8 +277,16 @@ def spawn_orchestrator(*, scenario_id: str, token: str, config) -> int:
         "--compose-file",
         str(config.compose_file),
     ]
+    if target_profile:
+        cmd += ["--target-profile", target_profile]
+    if remote_node_urls:
+        cmd += ["--remote-node-urls", ",".join(remote_node_urls)]
+
     env = os.environ.copy()
     env["E2E_CASHU_TOKEN"] = token
+    for idx, admin_token in enumerate(remote_admin_tokens or []):
+        env[f"REMOTE_NODE_ADMIN_TOKEN_{idx}"] = admin_token
+
     proc = subprocess.run(  # noqa: S603 — args fully controlled
         cmd,
         env=env,

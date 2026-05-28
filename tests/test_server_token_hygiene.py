@@ -57,7 +57,15 @@ def test_token_not_persisted_after_run(config, capsys):
     any test_results row.
     """
 
-    def fake_runner(*, scenario_id, token, config):
+    def fake_runner(
+        *,
+        scenario_id,
+        token,
+        config,
+        target_profile=None,
+        remote_node_urls=None,
+        remote_admin_tokens=None,
+    ):
         # Simulate orchestrator inserting a row — without storing the token.
         from datetime import datetime
 
@@ -70,6 +78,7 @@ def test_token_not_persisted_after_run(config, capsys):
                 started_at=datetime.utcnow(),
                 status="passed",
                 artifacts_dir=None,
+                target_profile=target_profile or "local",
             )
             session.add(row)
             session.commit()

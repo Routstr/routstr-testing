@@ -61,6 +61,10 @@ class RunSummary(BaseModel):
     started_at: datetime
     finished_at: Optional[datetime] = None
     token_consumed_sats: int = 0
+    # ROU-151 — `local` (default) or `remote`. Surfaced so the Runs table
+    # can render a badge / filter without needing the detail endpoint.
+    target_profile: str = "local"
+    remote_node_urls: Optional[list[str]] = None
 
 
 class TestResultOut(BaseModel):
@@ -81,6 +85,27 @@ class RunDetail(RunSummary):
 class RunCreate(BaseModel):
     scenario_id: str
     cashu_token: str = Field(..., min_length=1)
+    # ROU-151 target-profile fields. Admin tokens are write-only and never
+    # persisted — same contract as `cashu_token`.
+    target_profile: Optional[str] = Field(
+        default=None,
+        description="`local` (default) or `remote`. Overrides the scenario YAML.",
+    )
+    remote_node_urls: Optional[list[str]] = Field(
+        default=None,
+        description=(
+            "Routstr node base URLs to point the harness at when "
+            "target_profile=remote. At least one URL is required for remote."
+        ),
+    )
+    remote_admin_tokens: Optional[list[str]] = Field(
+        default=None,
+        description=(
+            "Optional per-node admin tokens, positional with remote_node_urls. "
+            "Never persisted; passed to the orchestrator via "
+            "REMOTE_NODE_ADMIN_TOKEN_<i> env vars."
+        ),
+    )
 
 
 class RunCreated(BaseModel):

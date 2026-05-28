@@ -191,3 +191,115 @@ def test_orchestrator_skips_balance_capture_when_services_not_required(
     assert call_count["n"] == 0
     row = _read_run(db_path, run_id)
     assert row.token_consumed_sats == 0
+
+
+def test_orchestrate_remote_profile_skips_compose_and_persists_urls(
+    tmp_path, monkeypatch
+):
+    """target_profile=remote should:
+
+    - NOT bring compose up
+    - NOT probe the local routstrd balance
+    - persist target_profile=remote + remote_node_urls_json on the run row
+    - export REMOTE_NODE_URLS + ROUTSTRD_BOOTSTRAP_PROVIDERS + admin-token
+      env vars into the pytest invocation
+    """
+    from runner import orchestrate as orch_mod
+
+    scenarios_dir = tmp_path / "scenarios"
+    scenarios_dir.mkdir()
+    (scenarios_dir / "remote_smoke.yaml").write_text(
+        "id: remote_smoke\n"
+        "name: Remote smoke\n"
+        "selection:\n  paths: []\n"
+        "services_required: false\n"
+    )
+
+    compose_called = {"n": 0}
+
+    def fail_if_called(*_a, **_kw):
+        compose_called["n"] += 1
+        raise AssertionError("compose must not be invoked in remote profile")
+
+    monkeypatch.setattr(orch_mod, "compose_up", fail_if_called)
+    monkeypatch.setattr(orch_mod, "compose_down", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        orch_mod, "compose_dump_logs", lambda *a, **kw: None
+    )
+    # Balance probe must NOT run in remote mode either.
+    monkeypatch.setattr(
+        orch_mod,
+        "fetch_routstrd_total_sats",
+        lambda: (_ for _ in ()).throw(AssertionError("balance probe in remote")),
+    )
+
+    junit_xml = (
+        "<?xml version='1.0' ?>"
+        "<testsuites><testsuite name='ok' tests='0' failures='0' errors='0' skipped='0' time='0.001'>"
+        "</testsuite></testsuites>"
+    )
+    seen_env: dict[str, str] = {}
+
+    def fake_run_pytest(scenario, junit_path, env):
+        seen_env.update(env)
+        junit_path.write_text(junit_xml)
+        return 0, "ok"
+
+    monkeypatch.setattr(orch_mod, "_run_pytest", fake_run_pytest)
+    monkeypatch.setenv("SKIP_SYNC", "1")
+
+    db_path = tmp_path / "runs.db"
+    run_id = orch_mod.orchestrate(
+        scenario_id="remote_smoke",
+        token=None,
+        db_path=db_path,
+        scenarios_dir=scenarios_dir,
+        compose_file=tmp_path / "compose.yml",
+        target_profile_override="remote",
+        remote_node_urls=["https://node1.example", "https://node2.example/"],
+        remote_admin_tokens=["secret-1", "secret-2"],
+    )
+
+    assert compose_called["n"] == 0
+    row = _read_run(db_path, run_id)
+    assert row.target_profile == "remote"
+    import json as _json
+
+    assert _json.loads(row.remote_node_urls_json) == [
+        "https://node1.example/",
+        "https://node2.example/",
+    ]
+    assert seen_env["TARGET_PROFILE"] == "remote"
+    assert seen_env["REMOTE_NODE_URLS"] == (
+        "https://node1.example/,https://node2.example/"
+    )
+    assert seen_env["ROUTSTRD_BOOTSTRAP_PROVIDERS"] == (
+        "https://node1.example/,https://node2.example/"
+    )
+    assert seen_env["REMOTE_NODE_ADMIN_TOKEN_0"] == "secret-1"
+    assert seen_env["REMOTE_NODE_ADMIN_TOKEN_1"] == "secret-2"
+
+
+def test_orchestrate_remote_profile_requires_urls(tmp_path, monkeypatch):
+    """target_profile=remote without URLs is a ValueError before any side-effect."""
+    from runner import orchestrate as orch_mod
+
+    scenarios_dir = tmp_path / "scenarios"
+    scenarios_dir.mkdir()
+    (scenarios_dir / "no_services.yaml").write_text(
+        "id: no_services\nname: NoServices\nservices_required: false\n"
+    )
+    monkeypatch.setenv("SKIP_SYNC", "1")
+
+    import pytest as _pytest
+
+    with _pytest.raises(ValueError, match="remote"):
+        orch_mod.orchestrate(
+            scenario_id="no_services",
+            token=None,
+            db_path=tmp_path / "runs.db",
+            scenarios_dir=scenarios_dir,
+            compose_file=tmp_path / "compose.yml",
+            target_profile_override="remote",
+            remote_node_urls=None,
+        )

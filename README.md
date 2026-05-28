@@ -59,6 +59,45 @@ make logs
 make down
 ```
 
+### Testing a deployed node (ROU-151)
+
+The orchestrator can point the test suite at **externally-deployed routstr
+nodes** instead of building `node-a` / `node-b` from `vendor/routstr-core/`:
+
+```bash
+python -m runner.orchestrate \
+    --scenario smoke \
+    --target-profile remote \
+    --remote-node-urls https://node1.example,https://node2.example
+```
+
+In `remote` mode:
+
+- `docker compose up` is skipped — your deployment isn't touched.
+- `TARGET_PROFILE=remote`, `REMOTE_NODE_URLS=...`, and
+  `ROUTSTRD_BOOTSTRAP_PROVIDERS=...` are exported into pytest's env. The
+  routstrd seed-providers step picks the latter up so the daemon routes
+  through the remote nodes.
+- The `tests/conftest.py` skip-rule auto-skips any test tagged
+  `@pytest.mark.destructive`, and skips `@pytest.mark.admin_required` tests
+  unless at least one `REMOTE_NODE_ADMIN_TOKEN_<i>` env var is set.
+- The resulting `runs` row carries `target_profile=remote` and
+  `remote_node_urls_json`. Admin tokens are never persisted.
+
+Pass per-node admin tokens via env (preferred) or `--remote-admin-tokens`
+(local dev only — argv is visible in `ps`):
+
+```bash
+REMOTE_NODE_ADMIN_TOKEN_0=secret1 REMOTE_NODE_ADMIN_TOKEN_1=secret2 \
+python -m runner.orchestrate --scenario smoke \
+    --target-profile remote \
+    --remote-node-urls https://node1.example,https://node2.example
+```
+
+The Web UI Run modal exposes the same fields: a `target_profile` dropdown,
+a node-URLs textarea, and a masked admin-token field per node. The Runs
+table shows the profile badge per row and a filter in the header.
+
 ## Services
 
 | Service      | Description                                      |

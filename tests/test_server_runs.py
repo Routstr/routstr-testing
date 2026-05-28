@@ -201,9 +201,20 @@ def test_create_run_spawns_orchestrator_and_lists(setup):
     config, engine = setup
     seen: dict = {}
 
-    def fake_runner(*, scenario_id, token, config):
+    def fake_runner(
+        *,
+        scenario_id,
+        token,
+        config,
+        target_profile=None,
+        remote_node_urls=None,
+        remote_admin_tokens=None,
+    ):
         seen["scenario_id"] = scenario_id
         seen["token"] = token
+        seen["target_profile"] = target_profile
+        seen["remote_node_urls"] = remote_node_urls
+        seen["remote_admin_tokens"] = remote_admin_tokens
         return _seed_run(engine, scenario_id=scenario_id, status="passed")
 
     app = create_app(config=config, orchestrate_runner=fake_runner)
@@ -215,7 +226,11 @@ def test_create_run_spawns_orchestrator_and_lists(setup):
     assert r.status_code == 201, r.text
     body = r.json()
     assert body["scenario_id"] == "smoke"
-    assert seen == {"scenario_id": "smoke", "token": "cashuABCD"}
+    assert seen["scenario_id"] == "smoke"
+    assert seen["token"] == "cashuABCD"
+    assert seen["target_profile"] is None
+    assert seen["remote_node_urls"] is None
+    assert seen["remote_admin_tokens"] is None
 
     # Confirm acceptance criterion: the new run appears in GET /api/runs
     listing = c.get("/api/runs").json()
@@ -239,3 +254,112 @@ def test_health(setup):
     app = create_app(config=config)
     c = TestClient(app)
     assert c.get("/api/health").json() == {"status": "ok"}
+
+
+def test_create_run_remote_profile_forwards_urls_and_tokens(setup):
+    """POST /api/runs with target_profile=remote forwards URLs + tokens
+    (admin tokens via the runner's kwargs, never persisted to runs.db).
+    """
+    config, engine = setup
+    seen: dict = {}
+
+    def fake_runner(
+        *,
+        scenario_id,
+        token,
+        config,
+        target_profile=None,
+        remote_node_urls=None,
+        remote_admin_tokens=None,
+    ):
+        seen.update(
+            scenario_id=scenario_id,
+            target_profile=target_profile,
+            remote_node_urls=remote_node_urls,
+            remote_admin_tokens=remote_admin_tokens,
+        )
+        # Mirror what the orchestrator does: persist target_profile + URLs.
+        import json
+
+        with get_session(engine) as session:
+            row = Run(
+                scenario_id=scenario_id,
+                status="passed",
+                target_profile=target_profile or "local",
+                remote_node_urls_json=(
+                    json.dumps(remote_node_urls) if remote_node_urls else None
+                ),
+            )
+            session.add(row)
+            session.commit()
+            session.refresh(row)
+            return row.id
+
+    app = create_app(config=config, orchestrate_runner=fake_runner)
+    c = TestClient(app)
+    r = c.post(
+        "/api/runs",
+        json={
+            "scenario_id": "smoke",
+            "cashu_token": "cashuREMOTE",
+            "target_profile": "remote",
+            "remote_node_urls": ["https://node1.example", "https://node2.example"],
+            "remote_admin_tokens": ["admin-1", "admin-2"],
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert seen["target_profile"] == "remote"
+    assert seen["remote_node_urls"] == ["https://node1.example", "https://node2.example"]
+    assert seen["remote_admin_tokens"] == ["admin-1", "admin-2"]
+
+    # The Run summary surfaces target_profile + URLs.
+    runs = c.get("/api/runs").json()
+    me = next(r for r in runs if r["scenario_id"] == "smoke")
+    assert me["target_profile"] == "remote"
+    assert me["remote_node_urls"] == [
+        "https://node1.example",
+        "https://node2.example",
+    ]
+
+    # Listing filter by target_profile narrows correctly.
+    local_only = c.get("/api/runs?target_profile=local").json()
+    assert all(r["target_profile"] == "local" for r in local_only)
+    remote_only = c.get("/api/runs?target_profile=remote").json()
+    assert remote_only and all(r["target_profile"] == "remote" for r in remote_only)
+
+
+def test_create_run_remote_profile_requires_urls(setup):
+    """target_profile=remote without any URLs is a 400."""
+    config, _ = setup
+
+    def fake_runner(**_kw):  # would be a bug if this is reached
+        raise AssertionError("orchestrator should not be invoked on validation error")
+
+    app = create_app(config=config, orchestrate_runner=fake_runner)
+    c = TestClient(app)
+    r = c.post(
+        "/api/runs",
+        json={
+            "scenario_id": "smoke",
+            "cashu_token": "cashuABCD",
+            "target_profile": "remote",
+        },
+    )
+    assert r.status_code == 400, r.text
+    assert "remote" in r.json()["detail"].lower()
+
+
+def test_create_run_unknown_target_profile_rejected(setup):
+    config, _ = setup
+    app = create_app(config=config, orchestrate_runner=lambda **_kw: 0)
+    c = TestClient(app)
+    r = c.post(
+        "/api/runs",
+        json={
+            "scenario_id": "smoke",
+            "cashu_token": "cashuABCD",
+            "target_profile": "cloud",
+        },
+    )
+    assert r.status_code == 400, r.text
+    assert "target_profile" in r.json()["detail"]
