@@ -24,12 +24,16 @@ class ServerConfig:
     orchestrate_cmd: list[str]
     cors_origins: list[str]
     routstrd_url: str = "http://localhost:8091"
+    providers_dir: Path = REPO_ROOT / "providers"
 
     @classmethod
     def from_env(cls) -> "ServerConfig":
         return cls(
             scenarios_dir=Path(
                 os.environ.get("SERVER_SCENARIOS_DIR", REPO_ROOT / "scenarios")
+            ),
+            providers_dir=Path(
+                os.environ.get("SERVER_PROVIDERS_DIR", REPO_ROOT / "providers")
             ),
             db_path=Path(os.environ.get("SERVER_DB_PATH", REPO_ROOT / "runs.db")),
             logs_dir=Path(os.environ.get("SERVER_LOGS_DIR", REPO_ROOT / "logs")),

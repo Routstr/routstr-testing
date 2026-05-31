@@ -1,4 +1,6 @@
 import {
+  MOCK_UPSTREAM,
+  Provider,
   Run,
   RunCreated,
   RunDetail,
@@ -35,6 +37,22 @@ function buildRunBody(scenarioId: string, req: RunRequest) {
   // Admin tokens are positional with the URL list — keep the slot even when
   // a given node has no token, so the server can correlate index → URL.
   const adminTokens = remoteNodes.map((entry) => entry.adminToken ?? '');
+  // Upstream env: drop blank values so an empty masked field doesn't shadow a
+  // key already set server-side. Only send the block for a real provider.
+  const upstreamProfile = req.upstreamProfile ?? MOCK_UPSTREAM;
+  const upstreamEnv = Object.fromEntries(
+    Object.entries(req.upstreamEnv ?? {}).filter(([, v]) => v)
+  );
+  const upstreamBlock =
+    upstreamProfile !== MOCK_UPSTREAM
+      ? {
+          upstream_profile: upstreamProfile,
+          ...(Object.keys(upstreamEnv).length ? { upstream_env: upstreamEnv } : {}),
+          ...(typeof req.upstreamMaxUsd === 'number'
+            ? { upstream_max_usd: req.upstreamMaxUsd }
+            : {}),
+        }
+      : {};
   return {
     scenario_id: scenarioId,
     cashu_token: req.cashuToken,
@@ -49,11 +67,13 @@ function buildRunBody(scenarioId: string, req: RunRequest) {
             : {}),
         }
       : {}),
+    ...upstreamBlock,
   };
 }
 
 export const api = {
   listScenarios: () => request<ScenarioSummary[]>('/api/scenarios'),
+  listProviders: () => request<Provider[]>('/api/providers'),
   getScenario: (scenarioId: string) =>
     request<ScenarioDetail>(`/api/scenarios/${scenarioId}`),
   createScenario: (payload: { id: string; yaml: string }) =>

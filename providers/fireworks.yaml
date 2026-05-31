@@ -1,0 +1,11 @@
+id: fireworks
+name: Fireworks AI
+upstream_base_url: https://api.fireworks.ai/inference/v1
+api_key_env: FIREWORKS_API_KEY
+models_file: providers/models/fireworks.json
+required_env:
+  - name: FIREWORKS_API_KEY
+notes: |
+  OpenAI-compatible surface; maps to routstr-core's FireworksUpstreamProvider.
+  Model ids use the `accounts/fireworks/models/<name>` path. Returns `usage`,
+  so upstream_actual_cost_usd is priced from the model catalog.

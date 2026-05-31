@@ -24,6 +24,10 @@ class ScenarioSummary(BaseModel):
     name: str
     description: str = ""
     expected_cost_sats: int = 0
+    # ROU-153 — surfaced so the Run modal can show the USD cost preview and
+    # the Scenarios list can flag real-upstream scenarios.
+    upstream_profile: str = "mock"
+    estimated_upstream_cost_usd: float = 0.0
     stats: ScenarioStats = Field(default_factory=ScenarioStats)
 
 
@@ -65,6 +69,10 @@ class RunSummary(BaseModel):
     # can render a badge / filter without needing the detail endpoint.
     target_profile: str = "local"
     remote_node_urls: Optional[list[str]] = None
+    # ROU-153 — upstream provider profile + USD cost telemetry.
+    upstream_profile: str = "mock"
+    upstream_estimated_cost_usd: Optional[float] = None
+    upstream_actual_cost_usd: Optional[float] = None
 
 
 class TestResultOut(BaseModel):
@@ -106,11 +114,54 @@ class RunCreate(BaseModel):
             "REMOTE_NODE_ADMIN_TOKEN_<i> env vars."
         ),
     )
+    # ROU-153 upstream-profile fields.
+    upstream_profile: Optional[str] = Field(
+        default=None,
+        description="`mock` (default) or a providers/<id>.yaml id. Overrides the scenario YAML.",
+    )
+    upstream_env: Optional[dict[str, str]] = Field(
+        default=None,
+        description=(
+            "Per-provider env vars (e.g. {'OPENAI_API_KEY': 'sk-...'}). "
+            "Write-only; forwarded to the orchestrator subprocess as env vars "
+            "and NEVER persisted — same contract as cashu_token / admin tokens."
+        ),
+    )
+    upstream_max_usd: Optional[float] = Field(
+        default=None,
+        description=(
+            "Per-run override of the cost ceiling. The orchestrator refuses to "
+            "start if the scenario's estimated upstream cost exceeds this."
+        ),
+    )
 
 
 class RunCreated(BaseModel):
     run_id: int
     scenario_id: str
+
+
+class ProviderRequiredEnv(BaseModel):
+    name: str
+    secret: bool = False
+    has_default: bool = False
+
+
+class ProviderModel(BaseModel):
+    id: str
+    name: str = ""
+
+
+class ProviderSummary(BaseModel):
+    """One upstream provider profile, for the UI Run-modal dropdown."""
+
+    id: str
+    name: str
+    upstream_base_url: str
+    api_key_env: str
+    required_env: list[ProviderRequiredEnv] = []
+    models: list[ProviderModel] = []
+    notes: str = ""
 
 
 class LogListing(BaseModel):

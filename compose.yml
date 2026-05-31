@@ -37,8 +37,12 @@ services:
     environment:
       - DATABASE_URL=sqlite+aiosqlite:////data/node-a.db
       - RELAYS=ws://relay:8080
-      - UPSTREAM_BASE_URL=http://mock-openai:3000
-      - UPSTREAM_API_KEY=test-key
+      # UPSTREAM_* default to the in-compose mock-openai (upstream_profile=mock).
+      # For a real provider the orchestrator (ROU-153) exports these before
+      # `docker compose up`, pointing node-a at the live upstream + catalog.
+      - UPSTREAM_BASE_URL=${UPSTREAM_BASE_URL:-http://mock-openai:3000}
+      - UPSTREAM_API_KEY=${UPSTREAM_API_KEY:-test-key}
+      - MODELS_PATH=${UPSTREAM_MODELS_PATH:-models.json}
       - CASHU_MINTS=${CASHU_MINTS:-https://testnut.cashu.space}
       - ADMIN_PASSWORD=${NODE_A_ADMIN_PASSWORD:-test-admin-pw}
       - NAME=NodeA
@@ -56,6 +60,10 @@ services:
       - PAYOUT_INTERVAL=86400
     volumes:
       - node-a-data:/data
+      # Real-upstream model catalogs (ROU-153), mounted read-only. The
+      # orchestrator sets MODELS_PATH=/providers-models/<provider>.json for a
+      # real upstream_profile; for `mock` MODELS_PATH stays at the image default.
+      - ./providers/models:/providers-models:ro
     depends_on:
       relay:
         condition: service_healthy
@@ -78,8 +86,9 @@ services:
     environment:
       - DATABASE_URL=sqlite+aiosqlite:////data/node-b.db
       - RELAYS=ws://relay:8080
-      - UPSTREAM_BASE_URL=http://mock-openai:3000
-      - UPSTREAM_API_KEY=test-key
+      - UPSTREAM_BASE_URL=${UPSTREAM_BASE_URL:-http://mock-openai:3000}
+      - UPSTREAM_API_KEY=${UPSTREAM_API_KEY:-test-key}
+      - MODELS_PATH=${UPSTREAM_MODELS_PATH:-models.json}
       - CASHU_MINTS=${CASHU_MINTS:-https://testnut.cashu.space}
       - NAME=NodeB
       - DESCRIPTION=Test node B
@@ -96,6 +105,7 @@ services:
       - PAYOUT_INTERVAL=86400
     volumes:
       - node-b-data:/data
+      - ./providers/models:/providers-models:ro
     depends_on:
       relay:
         condition: service_healthy

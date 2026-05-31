@@ -1,0 +1,124 @@
+{
+  "models": [
+    {
+      "id": "llama-3.1-8b-instant",
+      "canonical_slug": "llama-3.1-8b-instant",
+      "hugging_face_id": "",
+      "name": "Groq: Llama 3.1 8B Instant",
+      "created": 1730000000,
+      "description": "Very cheap, very fast on Groq LPU hardware.",
+      "context_length": 131072,
+      "architecture": {
+        "modality": "text->text",
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ],
+        "tokenizer": "GPT",
+        "instruct_type": null
+      },
+      "pricing": {
+        "prompt": "0.00000005",
+        "completion": "0.00000008",
+        "request": "0",
+        "image": "0",
+        "web_search": "0",
+        "internal_reasoning": "0"
+      },
+      "top_provider": {
+        "context_length": 131072,
+        "max_completion_tokens": null,
+        "is_moderated": false
+      },
+      "per_request_limits": null,
+      "supported_parameters": [
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "stop"
+      ]
+    },
+    {
+      "id": "llama-3.3-70b-versatile",
+      "canonical_slug": "llama-3.3-70b-versatile",
+      "hugging_face_id": "",
+      "name": "Groq: Llama 3.3 70B Versatile",
+      "created": 1730000000,
+      "description": "Mid-tier open-weight on Groq.",
+      "context_length": 131072,
+      "architecture": {
+        "modality": "text->text",
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ],
+        "tokenizer": "GPT",
+        "instruct_type": null
+      },
+      "pricing": {
+        "prompt": "0.00000059",
+        "completion": "0.00000079",
+        "request": "0",
+        "image": "0",
+        "web_search": "0",
+        "internal_reasoning": "0"
+      },
+      "top_provider": {
+        "context_length": 131072,
+        "max_completion_tokens": null,
+        "is_moderated": false
+      },
+      "per_request_limits": null,
+      "supported_parameters": [
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "stop"
+      ]
+    },
+    {
+      "id": "moonshotai/kimi-k2-instruct",
+      "canonical_slug": "moonshotai/kimi-k2-instruct",
+      "hugging_face_id": "",
+      "name": "Groq: Kimi K2 Instruct",
+      "created": 1730000000,
+      "description": "Larger frontier-class open model on Groq.",
+      "context_length": 131072,
+      "architecture": {
+        "modality": "text->text",
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ],
+        "tokenizer": "GPT",
+        "instruct_type": null
+      },
+      "pricing": {
+        "prompt": "0.000001",
+        "completion": "0.000003",
+        "request": "0",
+        "image": "0",
+        "web_search": "0",
+        "internal_reasoning": "0"
+      },
+      "top_provider": {
+        "context_length": 131072,
+        "max_completion_tokens": null,
+        "is_moderated": false
+      },
+      "per_request_limits": null,
+      "supported_parameters": [
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "stop"
+      ]
+    }
+  ]
+}

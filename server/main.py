@@ -12,6 +12,7 @@ from runner.models import get_engine
 
 from .balance import router as balance_router
 from .config import ServerConfig
+from .providers import router as providers_router
 from .runs import router as runs_router
 from .runs import spawn_orchestrator
 from .scenarios import router as scenarios_router
@@ -67,6 +68,7 @@ def create_app(
     app.include_router(scenarios_router)
     app.include_router(runs_router)
     app.include_router(balance_router)
+    app.include_router(providers_router)
 
     @app.get("/api/health")
     def health() -> dict[str, str]:

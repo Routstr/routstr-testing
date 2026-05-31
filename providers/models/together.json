@@ -1,0 +1,124 @@
+{
+  "models": [
+    {
+      "id": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+      "canonical_slug": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+      "hugging_face_id": "",
+      "name": "Together: Llama 3.3 70B Instruct Turbo",
+      "created": 1730000000,
+      "description": "Mid-tier open-weight on Together.",
+      "context_length": 131072,
+      "architecture": {
+        "modality": "text->text",
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ],
+        "tokenizer": "GPT",
+        "instruct_type": null
+      },
+      "pricing": {
+        "prompt": "0.00000088",
+        "completion": "0.00000088",
+        "request": "0",
+        "image": "0",
+        "web_search": "0",
+        "internal_reasoning": "0"
+      },
+      "top_provider": {
+        "context_length": 131072,
+        "max_completion_tokens": null,
+        "is_moderated": false
+      },
+      "per_request_limits": null,
+      "supported_parameters": [
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "stop"
+      ]
+    },
+    {
+      "id": "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
+      "canonical_slug": "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
+      "hugging_face_id": "",
+      "name": "Together: Llama 3.1 8B Instruct Turbo",
+      "created": 1730000000,
+      "description": "Cheap open-weight on Together.",
+      "context_length": 131072,
+      "architecture": {
+        "modality": "text->text",
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ],
+        "tokenizer": "GPT",
+        "instruct_type": null
+      },
+      "pricing": {
+        "prompt": "0.00000018",
+        "completion": "0.00000018",
+        "request": "0",
+        "image": "0",
+        "web_search": "0",
+        "internal_reasoning": "0"
+      },
+      "top_provider": {
+        "context_length": 131072,
+        "max_completion_tokens": null,
+        "is_moderated": false
+      },
+      "per_request_limits": null,
+      "supported_parameters": [
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "stop"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen2.5-72B-Instruct-Turbo",
+      "canonical_slug": "Qwen/Qwen2.5-72B-Instruct-Turbo",
+      "hugging_face_id": "",
+      "name": "Together: Qwen2.5 72B Instruct Turbo",
+      "created": 1730000000,
+      "description": "Frontier-class open-weight on Together.",
+      "context_length": 32768,
+      "architecture": {
+        "modality": "text->text",
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ],
+        "tokenizer": "GPT",
+        "instruct_type": null
+      },
+      "pricing": {
+        "prompt": "0.0000012",
+        "completion": "0.0000012",
+        "request": "0",
+        "image": "0",
+        "web_search": "0",
+        "internal_reasoning": "0"
+      },
+      "top_provider": {
+        "context_length": 32768,
+        "max_completion_tokens": null,
+        "is_moderated": false
+      },
+      "per_request_limits": null,
+      "supported_parameters": [
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "stop"
+      ]
+    }
+  ]
+}

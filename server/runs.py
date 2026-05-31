@@ -72,6 +72,9 @@ def _to_summary(row: Run) -> RunSummary:
         token_consumed_sats=row.token_consumed_sats,
         target_profile=row.target_profile or "local",
         remote_node_urls=_decode_remote_urls(row.remote_node_urls_json),
+        upstream_profile=row.upstream_profile or "mock",
+        upstream_estimated_cost_usd=row.upstream_estimated_cost_usd,
+        upstream_actual_cost_usd=row.upstream_actual_cost_usd,
     )
 
 
@@ -89,6 +92,9 @@ def _to_detail(row: Run, test_rows: list[TestResult]) -> RunDetail:
         token_consumed_sats=row.token_consumed_sats,
         target_profile=row.target_profile or "local",
         remote_node_urls=_decode_remote_urls(row.remote_node_urls_json),
+        upstream_profile=row.upstream_profile or "mock",
+        upstream_estimated_cost_usd=row.upstream_estimated_cost_usd,
+        upstream_actual_cost_usd=row.upstream_actual_cost_usd,
         artifacts_dir=row.artifacts_dir,
         vendor_commits=commits,
         error_message=row.error_message,
@@ -173,6 +179,14 @@ def create_run(body: RunCreate, request: Request) -> RunCreated:
         )
     remote_admin_tokens = list(body.remote_admin_tokens or [])
 
+    upstream_profile = (body.upstream_profile or "").strip().lower() or None
+    # upstream_env keys are write-only; we forward them to the orchestrator as
+    # env vars and never persist or echo them. Drop empty values so a blank
+    # textarea field doesn't shadow a real key already in the server env.
+    upstream_env = {
+        k: v for k, v in (body.upstream_env or {}).items() if k and v
+    } or None
+
     runner_fn = _orchestrate_runner(request)
     try:
         run_id = runner_fn(
@@ -182,6 +196,9 @@ def create_run(body: RunCreate, request: Request) -> RunCreated:
             target_profile=target_profile,
             remote_node_urls=remote_urls or None,
             remote_admin_tokens=remote_admin_tokens or None,
+            upstream_profile=upstream_profile,
+            upstream_env=upstream_env,
+            upstream_max_usd=body.upstream_max_usd,
         )
     except OrchestratorError as exc:
         raise HTTPException(
@@ -258,6 +275,9 @@ def spawn_orchestrator(
     target_profile: Optional[str] = None,
     remote_node_urls: Optional[list[str]] = None,
     remote_admin_tokens: Optional[list[str]] = None,
+    upstream_profile: Optional[str] = None,
+    upstream_env: Optional[dict[str, str]] = None,
+    upstream_max_usd: Optional[float] = None,
 ) -> int:
     """Run the orchestrator and return the run id it inserted.
 
@@ -266,6 +286,11 @@ def spawn_orchestrator(
     vars — never argv, never persisted to runs.db. The remote node URLs
     DO go on argv since they're not secret (they end up in the runs.db
     row so the UI can show what was tested).
+
+    ROU-153: the upstream provider key(s) in `upstream_env` are passed via the
+    subprocess env (never argv, never persisted) — same secret contract as the
+    cashu token. The upstream profile id is NOT secret and goes on argv so it
+    can be recorded in the runs row.
     """
     cmd = list(config.orchestrate_cmd) + [
         "--scenario",
@@ -281,11 +306,17 @@ def spawn_orchestrator(
         cmd += ["--target-profile", target_profile]
     if remote_node_urls:
         cmd += ["--remote-node-urls", ",".join(remote_node_urls)]
+    if upstream_profile:
+        cmd += ["--upstream-profile", upstream_profile]
+    if upstream_max_usd is not None:
+        cmd += ["--upstream-max-usd", str(upstream_max_usd)]
 
     env = os.environ.copy()
     env["E2E_CASHU_TOKEN"] = token
     for idx, admin_token in enumerate(remote_admin_tokens or []):
         env[f"REMOTE_NODE_ADMIN_TOKEN_{idx}"] = admin_token
+    for key, value in (upstream_env or {}).items():
+        env[key] = value
 
     proc = subprocess.run(  # noqa: S603 — args fully controlled
         cmd,

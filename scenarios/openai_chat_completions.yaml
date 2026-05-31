@@ -1,0 +1,22 @@
+id: openai_chat_completions
+name: Chat completions against real OpenAI
+description: >
+  Drives node-a's /v1/chat/completions against a real OpenAI upstream and
+  asserts a real completion comes back. Selects the `real_upstream`-marked
+  tests in the vendored routstr-core suite (default-skipped under
+  UPSTREAM_PROFILE=mock). Real LLM call — costs real money; gated by
+  estimated_upstream_cost_usd + UPSTREAM_MAX_USD.
+target_profile: local                    # from ROU-151
+upstream_profile: openai                 # from ROU-153 → providers/openai.yaml
+required_env: [OPENAI_API_KEY]
+services_required: true
+selection:
+  paths:
+    - vendor/routstr-core/tests/e2e/test_real_upstream_chat.py
+  markers:
+    - real_upstream
+parameters:
+  model: gpt-4o-mini
+estimated_upstream_cost_usd: 0.01
+expected_cost_sats: 50
+timeout_seconds: 120

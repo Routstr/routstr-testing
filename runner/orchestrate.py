@@ -24,16 +24,19 @@ import os
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from sqlmodel import select
 
+from . import providers as provider_registry
 from .balance import fetch_total_sats as fetch_routstrd_total_sats
 from .compose import dump_logs as compose_dump_logs
 from .compose import down as compose_down
 from .compose import up as compose_up
+from .cost import USAGE_FILENAME, price_usage_file
 from .junit import parse_junit
 from .models import Run, Scenario as ScenarioRow, TestResult, get_engine, get_session
 from .scenario import (
@@ -48,6 +51,13 @@ DEFAULT_DB = REPO_ROOT / "runs.db"
 DEFAULT_LOGS = REPO_ROOT / "logs"
 DEFAULT_COMPOSE = REPO_ROOT / "compose.yml"
 DEFAULT_SCENARIOS = REPO_ROOT / "scenarios"
+DEFAULT_PROVIDERS = REPO_ROOT / "providers"
+
+# ROU-153 cost ceiling. The orchestrator refuses to start a real-upstream run
+# whose summed estimated cost exceeds this (raise UPSTREAM_MAX_USD per run).
+DEFAULT_UPSTREAM_MAX_USD = 1.00
+
+REAL_UPSTREAM_MARKER = "real_upstream"
 SYNC_SCRIPT = REPO_ROOT / "scripts" / "sync.sh"
 TOPUP_SCRIPT = REPO_ROOT / "scripts" / "topup_routstrd.sh"
 WAIT_FOR_SCRIPT = REPO_ROOT / "scripts" / "wait_for.sh"
@@ -185,6 +195,8 @@ def _insert_run(
     artifacts_dir: Path,
     target_profile: str = TARGET_PROFILE_LOCAL,
     remote_node_urls: list[str] | None = None,
+    upstream_profile: str = provider_registry.MOCK_PROFILE,
+    upstream_estimated_cost_usd: float | None = None,
 ) -> int:
     with get_session(engine) as session:
         row = Run(
@@ -196,6 +208,8 @@ def _insert_run(
             remote_node_urls_json=(
                 json.dumps(remote_node_urls) if remote_node_urls else None
             ),
+            upstream_profile=upstream_profile,
+            upstream_estimated_cost_usd=upstream_estimated_cost_usd,
         )
         session.add(row)
         session.commit()
@@ -212,6 +226,7 @@ def _finalize_run(
     vendor_commits: dict[str, str],
     error_message: str | None = None,
     token_consumed_sats: int = 0,
+    upstream_actual_cost_usd: float | None = None,
 ) -> None:
     with get_session(engine) as session:
         row = session.get(Run, run_id)
@@ -222,6 +237,8 @@ def _finalize_run(
         row.vendor_commits_json = json.dumps(vendor_commits)
         row.error_message = error_message
         row.token_consumed_sats = token_consumed_sats
+        if upstream_actual_cost_usd is not None:
+            row.upstream_actual_cost_usd = upstream_actual_cost_usd
         session.add(row)
         session.commit()
 
@@ -255,6 +272,135 @@ def _normalise_remote_url(url: str) -> str:
     return url.rstrip("/") + "/"
 
 
+class UpstreamConfigError(ValueError):
+    """Raised for an invalid upstream-profile configuration.
+
+    Surfaced before any stack bring-up so a missing key or over-budget run
+    fails fast with a clear message instead of charging a real provider.
+    """
+
+
+@dataclass
+class _UpstreamPlan:
+    profile: str
+    is_mock: bool
+    estimated_cost_usd: float
+    compose_env: dict[str, str]  # injected into compose (UPSTREAM_BASE_URL, ...)
+    models_file: Path | None = None  # host catalog used to price actual usage
+
+
+def _resolve_upstream(
+    scenario: Scenario,
+    *,
+    is_remote: bool,
+    providers_dir: Path,
+    upstream_env: dict[str, str] | None,
+    upstream_max_usd: float,
+) -> _UpstreamPlan:
+    """Validate the upstream profile and resolve the env compose needs.
+
+    Enforces the ROU-153 matrix (see issue table):
+      local  + mock          → default; no provider env, no cost gate.
+      local  + real_upstream → inject provider env; require api key + cost gate.
+      remote + mock          → only invalid when the scenario selects the
+                               `real_upstream` marker (a real-cost test against
+                               a node the harness can't point at a real
+                               upstream); otherwise it is ROU-151's read-only
+                               remote flow and stays valid.
+      remote + real_upstream → label + cost gate only; the harness does not
+                               configure someone else's node, so no provider
+                               key is required and no env is injected.
+    """
+    profile = (scenario.upstream_profile or provider_registry.MOCK_PROFILE).lower()
+    is_mock = provider_registry.is_mock(profile)
+    overlay = {**os.environ, **(upstream_env or {})}
+    selects_real = REAL_UPSTREAM_MARKER in scenario.selection.markers
+
+    if is_mock:
+        if is_remote and selects_real:
+            raise UpstreamConfigError(
+                "invalid profile combo: target_profile=remote with "
+                "upstream_profile=mock cannot run real_upstream tests — a "
+                "remote node's upstream is its operator's, not the harness's. "
+                "Set upstream_profile to a real provider (e.g. openai)."
+            )
+        return _UpstreamPlan(
+            profile=provider_registry.MOCK_PROFILE,
+            is_mock=True,
+            estimated_cost_usd=0.0,
+            compose_env={},
+        )
+
+    # Real upstream: cost gate applies in both local and remote modes.
+    estimated = float(scenario.estimated_upstream_cost_usd or 0.0)
+    if estimated > upstream_max_usd:
+        raise UpstreamConfigError(
+            f"estimated upstream cost ${estimated:.4f} exceeds UPSTREAM_MAX_USD "
+            f"${upstream_max_usd:.4f} for scenario {scenario.id!r}. Raise "
+            f"UPSTREAM_MAX_USD to run anyway."
+        )
+
+    try:
+        provider = provider_registry.load_provider(providers_dir, profile)
+    except (FileNotFoundError, ValueError) as exc:
+        raise UpstreamConfigError(str(exc)) from exc
+
+    # Scenario-declared required_env (beyond the provider's own) must be set.
+    scenario_missing = [
+        name
+        for name in scenario.required_env
+        if not overlay.get(name)
+    ]
+
+    if is_remote:
+        # Harness doesn't configure the remote node, so we don't need the
+        # provider api key; only scenario-level required_env is enforced.
+        if scenario_missing:
+            raise UpstreamConfigError(
+                "missing required env var(s) for scenario "
+                f"{scenario.id!r}: {', '.join(scenario_missing)}"
+            )
+        return _UpstreamPlan(
+            profile=provider.id,
+            is_mock=False,
+            estimated_cost_usd=estimated,
+            compose_env={},
+            models_file=_provider_models_path(providers_dir, provider),
+        )
+
+    # local + real_upstream: the harness wires node-a/node-b to the provider,
+    # so the provider api key (and any required_env) MUST be present.
+    missing = provider.missing_env(overlay) + scenario_missing
+    if missing:
+        raise UpstreamConfigError(
+            f"missing required env var(s) for upstream profile {provider.id!r}: "
+            f"{', '.join(dict.fromkeys(missing))}. Set them before starting the "
+            "stack (keys are passed through to compose, never persisted)."
+        )
+    compose_env = provider_registry.resolve_upstream_env(provider, env=overlay)
+    return _UpstreamPlan(
+        profile=provider.id,
+        is_mock=False,
+        estimated_cost_usd=estimated,
+        compose_env=compose_env,
+        models_file=_provider_models_path(providers_dir, provider),
+    )
+
+
+def _provider_models_path(
+    providers_dir: Path, provider: provider_registry.Provider
+) -> Path | None:
+    """Host path to the provider's model catalog (for pricing actual usage)."""
+    if not provider.models_file:
+        return None
+    candidate = Path(provider.models_file)
+    if candidate.is_absolute():
+        return candidate
+    # models_file is repo-relative (e.g. providers/models/openai.json); resolve
+    # it against the repo root, falling back to providers_dir's parent.
+    return (providers_dir.parent / provider.models_file).resolve()
+
+
 def orchestrate(
     *,
     scenario_id: str,
@@ -262,9 +408,13 @@ def orchestrate(
     db_path: Path = DEFAULT_DB,
     scenarios_dir: Path = DEFAULT_SCENARIOS,
     compose_file: Path = DEFAULT_COMPOSE,
+    providers_dir: Path = DEFAULT_PROVIDERS,
     target_profile_override: str | None = None,
+    upstream_profile_override: str | None = None,
     remote_node_urls: list[str] | None = None,
     remote_admin_tokens: list[str] | None = None,
+    upstream_env: dict[str, str] | None = None,
+    upstream_max_usd: float | None = None,
 ) -> int:
     """Run the orchestrator for one scenario.
 
@@ -280,8 +430,41 @@ def orchestrate(
     scenario = load_scenario(scenarios_dir, scenario_id)
     if target_profile_override:
         scenario.target_profile = target_profile_override
+    if upstream_profile_override:
+        scenario.upstream_profile = upstream_profile_override.strip().lower()
+
+    if upstream_max_usd is None:
+        try:
+            upstream_max_usd = float(
+                os.environ.get("UPSTREAM_MAX_USD", DEFAULT_UPSTREAM_MAX_USD)
+            )
+        except ValueError:
+            upstream_max_usd = DEFAULT_UPSTREAM_MAX_USD
 
     is_remote = scenario.is_remote
+
+    # Validate + resolve the upstream profile BEFORE any stack bring-up so a
+    # missing key / over-budget run fails fast without charging a provider.
+    upstream_plan = _resolve_upstream(
+        scenario,
+        is_remote=is_remote,
+        providers_dir=providers_dir,
+        upstream_env=upstream_env,
+        upstream_max_usd=upstream_max_usd,
+    )
+    if not upstream_plan.is_mock:
+        _log(
+            f"upstream profile: {upstream_plan.profile} "
+            f"(estimated ${upstream_plan.estimated_cost_usd:.4f}, "
+            f"cap ${upstream_max_usd:.2f})"
+        )
+        # Inject resolved provider env so `docker compose up` (which inherits
+        # this process's environment) points node-a/node-b at the real
+        # provider. Keys live only in os.environ for this process — never
+        # persisted to runs.db.
+        for key, value in upstream_plan.compose_env.items():
+            os.environ[key] = value
+
     if is_remote:
         if not remote_node_urls:
             raise ValueError(
@@ -308,6 +491,10 @@ def orchestrate(
         artifacts_dir=artifacts_dir,
         target_profile=scenario.target_profile,
         remote_node_urls=remote_node_urls if is_remote else None,
+        upstream_profile=upstream_plan.profile,
+        upstream_estimated_cost_usd=(
+            None if upstream_plan.is_mock else upstream_plan.estimated_cost_usd
+        ),
     )
     _log(
         f"run #{run_id} → artifacts at {artifacts_dir} "
@@ -319,6 +506,7 @@ def orchestrate(
     teardown_logs_needed = False
     balance_before: int | None = None
     balance_after: int | None = None
+    upstream_actual_cost: float | None = None
 
     try:
         ok, output = _run_sync()
@@ -387,6 +575,12 @@ def orchestrate(
             scenario_env[f"REMOTE_NODE_ADMIN_TOKEN_{idx}"] = admin_token
         if not token_ok:
             scenario_env["TOPUP_FAILED"] = "1"
+        # ROU-153: real_upstream tests append per-call usage here so the
+        # orchestrator can price actual spend from the provider catalog.
+        if not upstream_plan.is_mock:
+            scenario_env["UPSTREAM_USAGE_PATH"] = str(
+                artifacts_dir / USAGE_FILENAME
+            )
 
         try:
             rc, output = _run_pytest(scenario, junit_path, scenario_env)
@@ -409,6 +603,20 @@ def orchestrate(
 
         parsed = parse_junit(junit_path)
         _insert_test_results(engine, run_id, parsed)
+
+        # Best-effort actual upstream spend: price any usage a real_upstream
+        # test reported (artifacts/upstream_usage.jsonl) against the provider
+        # catalog. Stays None for mock or when no usage was reported.
+        if not upstream_plan.is_mock and upstream_plan.models_file is not None:
+            priced = price_usage_file(
+                artifacts_dir / USAGE_FILENAME, upstream_plan.models_file
+            )
+            if priced is not None:
+                upstream_actual_cost = priced.total_usd
+                _log(
+                    f"upstream actual cost: ${priced.total_usd:.6f} over "
+                    f"{priced.calls} call(s) ({priced.unpriced} unpriced)"
+                )
 
         if rc == 5:  # pytest "no tests collected"
             overall_status = "error"
@@ -457,10 +665,12 @@ def orchestrate(
             vendor_commits=vendor_commits,
             error_message=error_message,
             token_consumed_sats=token_consumed_sats,
+            upstream_actual_cost_usd=upstream_actual_cost,
         )
         _log(
             f"run #{run_id} status={overall_status} "
             f"consumed_sats={token_consumed_sats} "
+            f"upstream={upstream_plan.profile} "
             f"commits={list(vendor_commits)}"
         )
 
@@ -493,6 +703,32 @@ def main(argv: list[str] | None = None) -> int:
         "--compose-file",
         default=str(DEFAULT_COMPOSE),
         help="Path to docker compose file",
+    )
+    parser.add_argument(
+        "--providers-dir",
+        default=str(DEFAULT_PROVIDERS),
+        help="Directory containing upstream provider profile YAML files",
+    )
+    parser.add_argument(
+        "--upstream-profile",
+        default=os.environ.get("UPSTREAM_PROFILE"),
+        help=(
+            "Override the scenario YAML's upstream_profile. `mock` (default) "
+            "uses the in-compose mock-openai; any other value names a "
+            "providers/<id>.yaml profile and points node-a/node-b at the real "
+            "provider. The provider key must be set in the matching env var "
+            "(e.g. OPENAI_API_KEY) — it is passed to compose, never persisted."
+        ),
+    )
+    parser.add_argument(
+        "--upstream-max-usd",
+        type=float,
+        default=None,
+        help=(
+            "Refuse to start if the scenario's estimated upstream cost exceeds "
+            "this (USD). Defaults to $UPSTREAM_MAX_USD or "
+            f"${DEFAULT_UPSTREAM_MAX_USD:.2f}."
+        ),
     )
     parser.add_argument(
         "--target-profile",
@@ -540,16 +776,24 @@ def main(argv: list[str] | None = None) -> int:
             idx += 1
         remote_tokens = env_tokens
 
-    run_id = orchestrate(
-        scenario_id=args.scenario,
-        token=args.token,
-        db_path=Path(args.db),
-        scenarios_dir=Path(args.scenarios_dir),
-        compose_file=Path(args.compose_file),
-        target_profile_override=args.target_profile,
-        remote_node_urls=remote_urls or None,
-        remote_admin_tokens=remote_tokens or None,
-    )
+    try:
+        run_id = orchestrate(
+            scenario_id=args.scenario,
+            token=args.token,
+            db_path=Path(args.db),
+            scenarios_dir=Path(args.scenarios_dir),
+            compose_file=Path(args.compose_file),
+            providers_dir=Path(args.providers_dir),
+            target_profile_override=args.target_profile,
+            upstream_profile_override=args.upstream_profile,
+            remote_node_urls=remote_urls or None,
+            remote_admin_tokens=remote_tokens or None,
+            upstream_max_usd=args.upstream_max_usd,
+        )
+    except UpstreamConfigError as exc:
+        # Clear, fast failure before any stack bring-up (acceptance #4/#5).
+        print(f"[orchestrate] upstream config error: {exc}", file=sys.stderr)
+        return 2
 
     # Echo a machine-friendly summary so callers (FastAPI server in ROU-134)
     # can pick up the new run id without re-querying SQLite.

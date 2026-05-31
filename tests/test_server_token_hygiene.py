@@ -65,6 +65,9 @@ def test_token_not_persisted_after_run(config, capsys):
         target_profile=None,
         remote_node_urls=None,
         remote_admin_tokens=None,
+        upstream_profile=None,
+        upstream_env=None,
+        upstream_max_usd=None,
     ):
         # Simulate orchestrator inserting a row — without storing the token.
         from datetime import datetime

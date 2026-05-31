@@ -29,10 +29,16 @@ from typing import Any
 
 import yaml
 
+from .providers import MOCK_PROFILE
+
 
 TARGET_PROFILE_LOCAL = "local"
 TARGET_PROFILE_REMOTE = "remote"
 VALID_TARGET_PROFILES = (TARGET_PROFILE_LOCAL, TARGET_PROFILE_REMOTE)
+
+# Upstream profile (ROU-153). `mock` is the in-compose mock-openai container
+# (current default); any other value names a providers/*.yaml profile.
+UPSTREAM_PROFILE_MOCK = MOCK_PROFILE
 
 
 @dataclass
@@ -61,6 +67,9 @@ class Scenario:
     timeout_seconds: int = 600
     services_required: bool = True
     target_profile: str = TARGET_PROFILE_LOCAL
+    upstream_profile: str = UPSTREAM_PROFILE_MOCK
+    estimated_upstream_cost_usd: float = 0.0
+    required_env: list[str] = field(default_factory=list)
     raw_yaml: str = ""
 
     def env(self) -> dict[str, str]:
@@ -75,6 +84,7 @@ class Scenario:
             "SCENARIO_ID": self.id,
             "SCENARIO_EXPECTED_COST_SATS": str(self.expected_cost_sats),
             "TARGET_PROFILE": self.target_profile,
+            "UPSTREAM_PROFILE": self.upstream_profile,
         }
         for key, value in self.parameters.items():
             out[f"SCENARIO_PARAM_{key.upper()}"] = str(value)
@@ -83,6 +93,10 @@ class Scenario:
     @property
     def is_remote(self) -> bool:
         return self.target_profile == TARGET_PROFILE_REMOTE
+
+    @property
+    def is_mock_upstream(self) -> bool:
+        return self.upstream_profile == UPSTREAM_PROFILE_MOCK
 
 
 def _coerce_target_profile(raw: Any) -> str:
@@ -95,6 +109,19 @@ def _coerce_target_profile(raw: Any) -> str:
             f"{VALID_TARGET_PROFILES}"
         )
     return value
+
+
+def _coerce_upstream_profile(raw: Any) -> str:
+    """Normalise the upstream profile name.
+
+    Existence of a non-`mock` profile is validated lazily by the orchestrator
+    against the providers/ directory (so a typo surfaces with the list of
+    available providers), not here at YAML-load time.
+    """
+    if raw is None:
+        return UPSTREAM_PROFILE_MOCK
+    value = str(raw).strip().lower()
+    return value or UPSTREAM_PROFILE_MOCK
 
 
 def load_scenario(scenarios_dir: Path, scenario_id: str) -> Scenario:
@@ -117,6 +144,18 @@ def load_scenario(scenarios_dir: Path, scenario_id: str) -> Scenario:
     )
 
     target_profile = _coerce_target_profile(data.get("target_profile"))
+    upstream_profile = _coerce_upstream_profile(data.get("upstream_profile"))
+
+    raw_required = data.get("required_env") or []
+    required_env = [str(item) for item in raw_required]
+
+    try:
+        estimated_cost = float(data.get("estimated_upstream_cost_usd", 0) or 0)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"estimated_upstream_cost_usd in scenario {scenario_id!r} must be a "
+            f"number, got {data.get('estimated_upstream_cost_usd')!r}"
+        ) from exc
 
     return Scenario(
         id=data.get("id", scenario_id),
@@ -128,5 +167,8 @@ def load_scenario(scenarios_dir: Path, scenario_id: str) -> Scenario:
         timeout_seconds=int(data.get("timeout_seconds", 600)),
         services_required=bool(data.get("services_required", True)),
         target_profile=target_profile,
+        upstream_profile=upstream_profile,
+        estimated_upstream_cost_usd=estimated_cost,
+        required_env=required_env,
         raw_yaml=raw_yaml,
     )

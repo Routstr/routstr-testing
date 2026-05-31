@@ -20,6 +20,21 @@ function TargetProfileBadge({ profile }: { profile: TargetProfile }) {
   );
 }
 
+function UpstreamBadge({ profile }: { profile: string }) {
+  const real = profile && profile !== 'mock';
+  const tone = real
+    ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+    : 'border-slate-300 bg-slate-50 text-slate-500';
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${tone}`}
+      title={real ? 'Real upstream provider' : 'In-compose mock-openai'}
+    >
+      {profile || 'mock'}
+    </span>
+  );
+}
+
 export function RunsPage() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [loading, setLoading] = useState(true);
@@ -74,6 +89,7 @@ export function RunsPage() {
             <th className='py-2'>Status</th>
             <th className='py-2'>Scenario</th>
             <th className='py-2'>Profile</th>
+            <th className='py-2'>Upstream</th>
             <th className='py-2'>Started</th>
             <th className='py-2'>Finished</th>
             <th className='py-2'>Token spent</th>
@@ -89,6 +105,9 @@ export function RunsPage() {
               <td className='py-2'>{run.scenario_id}</td>
               <td className='py-2'>
                 <TargetProfileBadge profile={run.target_profile} />
+              </td>
+              <td className='py-2'>
+                <UpstreamBadge profile={run.upstream_profile} />
               </td>
               <td className='py-2'>
                 {new Date(run.started_at).toLocaleString()}

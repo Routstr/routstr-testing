@@ -166,6 +166,8 @@ export function ScenariosPage() {
         open={runOpen}
         scenarioName={selected?.name}
         estimatedCostSats={selected?.expected_cost_sats}
+        estimatedUpstreamCostUsd={selected?.estimated_upstream_cost_usd}
+        scenarioUpstreamProfile={selected?.upstream_profile}
         onClose={() => setRunOpen(false)}
         onSubmit={async (req) => {
           if (!selected) return;

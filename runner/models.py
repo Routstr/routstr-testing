@@ -6,8 +6,13 @@ target-profile fields on `runs`):
   scenarios(id, name, description, yaml, updated_at)
   runs(id, scenario_id, started_at, finished_at, status, vendor_commits_json,
        token_consumed_sats, artifacts_dir, error_message,
-       target_profile, remote_node_urls_json)
+       target_profile, remote_node_urls_json,
+       upstream_profile, upstream_estimated_cost_usd, upstream_actual_cost_usd)
   test_results(id, run_id, test_name, outcome, duration_ms, error_excerpt)
+
+ROU-153 adds the three `upstream_*` columns via the same idempotent ALTER
+path. Provider API keys are NEVER persisted — they live only in the env vars
+the orchestrator passes to compose / pytest.
 
 `target_profile` and `remote_node_urls_json` are added by `get_engine()` via
 an idempotent `ALTER TABLE ... ADD COLUMN` so existing databases pick the
@@ -51,6 +56,14 @@ class Run(SQLModel, table=True):
     # ROU-151: target-profile dimensions surfaced in the Runs UI.
     target_profile: str = Field(default="local", index=True)
     remote_node_urls_json: Optional[str] = None
+    # ROU-153: upstream-profile dimension. `upstream_profile` is `mock` for the
+    # in-compose mock-openai container, else a providers/*.yaml id. The two
+    # cost fields are USD: `estimated` is summed from scenario YAML before the
+    # run, `actual` is best-effort from provider `usage` (None when the
+    # provider doesn't report usable usage — e.g. streamed responses).
+    upstream_profile: str = Field(default="mock", index=True)
+    upstream_estimated_cost_usd: Optional[float] = None
+    upstream_actual_cost_usd: Optional[float] = None
 
 
 class TestResult(SQLModel, table=True):
@@ -77,6 +90,18 @@ _RUNS_LATER_COLUMNS: tuple[tuple[str, str], ...] = (
     (
         "remote_node_urls_json",
         "ALTER TABLE runs ADD COLUMN remote_node_urls_json TEXT",
+    ),
+    (
+        "upstream_profile",
+        "ALTER TABLE runs ADD COLUMN upstream_profile TEXT NOT NULL DEFAULT 'mock'",
+    ),
+    (
+        "upstream_estimated_cost_usd",
+        "ALTER TABLE runs ADD COLUMN upstream_estimated_cost_usd REAL",
+    ),
+    (
+        "upstream_actual_cost_usd",
+        "ALTER TABLE runs ADD COLUMN upstream_actual_cost_usd REAL",
     ),
 )
 

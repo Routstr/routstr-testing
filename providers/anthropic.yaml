@@ -1,0 +1,15 @@
+id: anthropic
+name: Anthropic
+upstream_base_url: https://api.anthropic.com/v1
+api_key_env: ANTHROPIC_API_KEY
+models_file: providers/models/anthropic.json
+required_env:
+  - name: ANTHROPIC_API_KEY
+notes: |
+  Anthropic serves /v1/messages with a different request/response body than
+  OpenAI's /v1/chat/completions. routstr-core already speaks this shape via
+  AnthropicUpstreamProvider (routstr/upstream/anthropic.py +
+  messages_dispatch.py), so the profile maps to an existing endpoint — no new
+  translator code in routstr-core. Anthropic does not return OpenRouter-style
+  `usage` pricing, so upstream_actual_cost_usd is estimated from the model
+  catalog, not the provider response.

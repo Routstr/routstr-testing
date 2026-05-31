@@ -209,6 +209,9 @@ def test_create_run_spawns_orchestrator_and_lists(setup):
         target_profile=None,
         remote_node_urls=None,
         remote_admin_tokens=None,
+        upstream_profile=None,
+        upstream_env=None,
+        upstream_max_usd=None,
     ):
         seen["scenario_id"] = scenario_id
         seen["token"] = token
@@ -271,6 +274,9 @@ def test_create_run_remote_profile_forwards_urls_and_tokens(setup):
         target_profile=None,
         remote_node_urls=None,
         remote_admin_tokens=None,
+        upstream_profile=None,
+        upstream_env=None,
+        upstream_max_usd=None,
     ):
         seen.update(
             scenario_id=scenario_id,

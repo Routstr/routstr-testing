@@ -1,0 +1,127 @@
+{
+  "models": [
+    {
+      "id": "gpt-4o-mini",
+      "canonical_slug": "gpt-4o-mini",
+      "hugging_face_id": "",
+      "name": "OpenAI: GPT-4o-mini",
+      "created": 1730000000,
+      "description": "Cheap, fast OpenAI model \u2014 good default for real_upstream smoke tests.",
+      "context_length": 128000,
+      "architecture": {
+        "modality": "text->text",
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ],
+        "tokenizer": "GPT",
+        "instruct_type": null
+      },
+      "pricing": {
+        "prompt": "0.00000015",
+        "completion": "0.0000006",
+        "request": "0",
+        "image": "0",
+        "web_search": "0",
+        "internal_reasoning": "0"
+      },
+      "top_provider": {
+        "context_length": 128000,
+        "max_completion_tokens": null,
+        "is_moderated": false
+      },
+      "per_request_limits": null,
+      "supported_parameters": [
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "stop"
+      ]
+    },
+    {
+      "id": "gpt-4o",
+      "canonical_slug": "gpt-4o",
+      "hugging_face_id": "",
+      "name": "OpenAI: GPT-4o",
+      "created": 1730000000,
+      "description": "Mid-tier multimodal flagship.",
+      "context_length": 128000,
+      "architecture": {
+        "modality": "text->text",
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ],
+        "tokenizer": "GPT",
+        "instruct_type": null
+      },
+      "pricing": {
+        "prompt": "0.0000025",
+        "completion": "0.00001",
+        "request": "0",
+        "image": "0",
+        "web_search": "0",
+        "internal_reasoning": "0"
+      },
+      "top_provider": {
+        "context_length": 128000,
+        "max_completion_tokens": null,
+        "is_moderated": false
+      },
+      "per_request_limits": null,
+      "supported_parameters": [
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "tools",
+        "tool_choice",
+        "stop",
+        "response_format"
+      ]
+    },
+    {
+      "id": "o3",
+      "canonical_slug": "o3",
+      "hugging_face_id": "",
+      "name": "OpenAI: o3",
+      "created": 1730000000,
+      "description": "Frontier reasoning model; expensive \u2014 gate behind UPSTREAM_MAX_USD.",
+      "context_length": 200000,
+      "architecture": {
+        "modality": "text->text",
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ],
+        "tokenizer": "GPT",
+        "instruct_type": null
+      },
+      "pricing": {
+        "prompt": "0.00001",
+        "completion": "0.00004",
+        "request": "0",
+        "image": "0",
+        "web_search": "0",
+        "internal_reasoning": "0"
+      },
+      "top_provider": {
+        "context_length": 200000,
+        "max_completion_tokens": null,
+        "is_moderated": false
+      },
+      "per_request_limits": null,
+      "supported_parameters": [
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "stop"
+      ]
+    }
+  ]
+}

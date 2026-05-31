@@ -1,0 +1,124 @@
+{
+  "models": [
+    {
+      "id": "accounts/fireworks/models/llama-v3p1-8b-instruct",
+      "canonical_slug": "accounts/fireworks/models/llama-v3p1-8b-instruct",
+      "hugging_face_id": "",
+      "name": "Fireworks: Llama 3.1 8B Instruct",
+      "created": 1730000000,
+      "description": "Cheap open-weight on Fireworks.",
+      "context_length": 131072,
+      "architecture": {
+        "modality": "text->text",
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ],
+        "tokenizer": "GPT",
+        "instruct_type": null
+      },
+      "pricing": {
+        "prompt": "0.0000002",
+        "completion": "0.0000002",
+        "request": "0",
+        "image": "0",
+        "web_search": "0",
+        "internal_reasoning": "0"
+      },
+      "top_provider": {
+        "context_length": 131072,
+        "max_completion_tokens": null,
+        "is_moderated": false
+      },
+      "per_request_limits": null,
+      "supported_parameters": [
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "stop"
+      ]
+    },
+    {
+      "id": "accounts/fireworks/models/llama-v3p3-70b-instruct",
+      "canonical_slug": "accounts/fireworks/models/llama-v3p3-70b-instruct",
+      "hugging_face_id": "",
+      "name": "Fireworks: Llama 3.3 70B Instruct",
+      "created": 1730000000,
+      "description": "Mid-tier open-weight on Fireworks.",
+      "context_length": 131072,
+      "architecture": {
+        "modality": "text->text",
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ],
+        "tokenizer": "GPT",
+        "instruct_type": null
+      },
+      "pricing": {
+        "prompt": "0.0000009",
+        "completion": "0.0000009",
+        "request": "0",
+        "image": "0",
+        "web_search": "0",
+        "internal_reasoning": "0"
+      },
+      "top_provider": {
+        "context_length": 131072,
+        "max_completion_tokens": null,
+        "is_moderated": false
+      },
+      "per_request_limits": null,
+      "supported_parameters": [
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "stop"
+      ]
+    },
+    {
+      "id": "accounts/fireworks/models/qwen2p5-72b-instruct",
+      "canonical_slug": "accounts/fireworks/models/qwen2p5-72b-instruct",
+      "hugging_face_id": "",
+      "name": "Fireworks: Qwen2.5 72B Instruct",
+      "created": 1730000000,
+      "description": "Frontier-class open-weight on Fireworks.",
+      "context_length": 32768,
+      "architecture": {
+        "modality": "text->text",
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ],
+        "tokenizer": "GPT",
+        "instruct_type": null
+      },
+      "pricing": {
+        "prompt": "0.0000009",
+        "completion": "0.0000009",
+        "request": "0",
+        "image": "0",
+        "web_search": "0",
+        "internal_reasoning": "0"
+      },
+      "top_provider": {
+        "context_length": 32768,
+        "max_completion_tokens": null,
+        "is_moderated": false
+      },
+      "per_request_limits": null,
+      "supported_parameters": [
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "stop"
+      ]
+    }
+  ]
+}

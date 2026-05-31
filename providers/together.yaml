@@ -1,0 +1,12 @@
+id: together
+name: Together AI
+upstream_base_url: https://api.together.xyz/v1
+api_key_env: TOGETHER_API_KEY
+models_file: providers/models/together.json
+required_env:
+  - name: TOGETHER_API_KEY
+notes: |
+  OpenAI-compatible /v1/chat/completions surface for open-weight models.
+  routstr-core has no dedicated Together class; it is served by the generic
+  OpenAI-compatible upstream (GenericUpstreamProvider) since the request shape
+  is identical. Model ids carry the full HF-style path.

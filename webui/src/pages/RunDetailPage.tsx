@@ -82,6 +82,24 @@ export function RunDetailPage() {
                 ))}
               </span>
             ) : null}
+            <span
+              className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                run.upstream_profile && run.upstream_profile !== 'mock'
+                  ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                  : 'border-slate-300 bg-slate-50 text-slate-500'
+              }`}
+              title='Upstream provider profile'
+            >
+              upstream: {run.upstream_profile || 'mock'}
+            </span>
+            {run.upstream_profile && run.upstream_profile !== 'mock' ? (
+              <span className='text-slate-600'>
+                est ${Number(run.upstream_estimated_cost_usd ?? 0).toFixed(4)}
+                {run.upstream_actual_cost_usd != null
+                  ? ` · actual $${Number(run.upstream_actual_cost_usd).toFixed(6)}`
+                  : ' · actual n/a'}
+              </span>
+            ) : null}
           </div>
         </div>
         <StatusBadge status={run.status} />

@@ -1,0 +1,13 @@
+id: openrouter
+name: OpenRouter
+upstream_base_url: https://openrouter.ai/api/v1
+api_key_env: OPENROUTER_API_KEY
+models_file: providers/models/openrouter.json
+required_env:
+  - name: OPENROUTER_API_KEY
+  - name: OPENROUTER_REFERER       # OpenRouter recommends a Referer for billing context
+    default: https://routstr-testing.local
+notes: |
+  OpenAI-compatible /v1/chat/completions surface. Routes to many upstreams;
+  model ids are namespaced (e.g. `openai/gpt-4o-mini`). Returns per-request
+  `usage` so upstream_actual_cost_usd is well-defined.

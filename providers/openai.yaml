@@ -1,0 +1,11 @@
+id: openai
+name: OpenAI
+upstream_base_url: https://api.openai.com/v1
+api_key_env: OPENAI_API_KEY               # which env var the harness expects
+models_file: providers/models/openai.json # curated catalog routstr-core loads via MODELS_PATH
+required_env:
+  - name: OPENAI_API_KEY
+notes: |
+  Standard OpenAI /v1/chat/completions shape — maps 1:1 to routstr-core's
+  OpenAIUpstreamProvider, no translator needed. Free-tier keys are
+  rate-limited; use a paid key for tests/e2e/test_load* scenarios.

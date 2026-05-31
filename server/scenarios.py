@@ -67,11 +67,19 @@ def _parse(scenarios_dir: Path, path: Path) -> ScenarioDetail:
         expected_cost_sats = int(data.get("expected_cost_sats", 0) or 0)
     except (TypeError, ValueError):
         expected_cost_sats = 0
+    try:
+        estimated_upstream_cost_usd = float(
+            data.get("estimated_upstream_cost_usd", 0) or 0
+        )
+    except (TypeError, ValueError):
+        estimated_upstream_cost_usd = 0.0
     return ScenarioDetail(
         id=scenario_id,
         name=str(data.get("name", scenario_id)),
         description=str(data.get("description", "")),
         expected_cost_sats=expected_cost_sats,
+        upstream_profile=str(data.get("upstream_profile", "mock")).lower(),
+        estimated_upstream_cost_usd=estimated_upstream_cost_usd,
         yaml=raw,
         updated_at=None,
     )
@@ -139,6 +147,8 @@ def list_scenarios(
             name=d.name,
             description=d.description,
             expected_cost_sats=d.expected_cost_sats,
+            upstream_profile=d.upstream_profile,
+            estimated_upstream_cost_usd=d.estimated_upstream_cost_usd,
             stats=stats.get(d.id, ScenarioStats()),
         )
         for d in parsed

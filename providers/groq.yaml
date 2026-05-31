@@ -1,0 +1,11 @@
+id: groq
+name: Groq
+upstream_base_url: https://api.groq.com/openai/v1
+api_key_env: GROQ_API_KEY
+models_file: providers/models/groq.json
+required_env:
+  - name: GROQ_API_KEY
+notes: |
+  OpenAI-compatible surface on Groq LPU hardware — very fast, very cheap.
+  Maps to routstr-core's GroqUpstreamProvider. Good default for cost-sensitive
+  real_upstream smoke runs.
