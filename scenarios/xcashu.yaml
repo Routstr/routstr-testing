@@ -1,0 +1,23 @@
+id: xcashu
+name: X-Cashu pay-per-request mode (multi-model chain)
+description: >
+  Exercises the node's X-Cashu single-use payment mode: a cashu token is sent in
+  the `X-Cashu` request header, the node redeems it, charges the exact request
+  cost, and returns the change as a fresh cashu token in the `X-Cashu` response
+  header. The test chains several models, threading each response's change token
+  into the next request — proving redemption, change issuance, and that the
+  change is itself spendable ecash. Requires X_CASHU_TOKEN (a funded token).
+
+services_required: false
+target_profile: local
+upstream_profile: openrouter
+
+selection:
+  paths:
+    - tests/integration/test_xcashu.py
+  markers:
+    - requires_funded_daemon
+
+expected_cost_sats: 5
+estimated_upstream_cost_usd: 0.01
+timeout_seconds: 300

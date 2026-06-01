@@ -61,6 +61,26 @@ REAL_UPSTREAM_MARKER = "real_upstream"
 SYNC_SCRIPT = REPO_ROOT / "scripts" / "sync.sh"
 TOPUP_SCRIPT = REPO_ROOT / "scripts" / "topup_routstrd.sh"
 WAIT_FOR_SCRIPT = REPO_ROOT / "scripts" / "wait_for.sh"
+
+# Tests that move real ecash append per-request spend (millisats) here; the
+# orchestrator sums it into the run's token_consumed_msats. Node billing is
+# sub-sat, so this is the only signal that reflects tiny real spends.
+SPEND_FILENAME = "spend.jsonl"
+
+
+def _sum_spend_msats(path: Path) -> int:
+    if not path.exists():
+        return 0
+    total = 0
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            total += int(json.loads(line).get("msats", 0))
+        except (ValueError, TypeError):
+            continue
+    return total
 COMMITS_FILE = REPO_ROOT / "vendor" / "COMMITS.txt"
 
 
@@ -226,6 +246,7 @@ def _finalize_run(
     vendor_commits: dict[str, str],
     error_message: str | None = None,
     token_consumed_sats: int = 0,
+    token_consumed_msats: int = 0,
     upstream_actual_cost_usd: float | None = None,
 ) -> None:
     with get_session(engine) as session:
@@ -237,6 +258,7 @@ def _finalize_run(
         row.vendor_commits_json = json.dumps(vendor_commits)
         row.error_message = error_message
         row.token_consumed_sats = token_consumed_sats
+        row.token_consumed_msats = token_consumed_msats
         if upstream_actual_cost_usd is not None:
             row.upstream_actual_cost_usd = upstream_actual_cost_usd
         session.add(row)
@@ -575,6 +597,9 @@ def orchestrate(
             scenario_env[f"REMOTE_NODE_ADMIN_TOKEN_{idx}"] = admin_token
         if not token_ok:
             scenario_env["TOPUP_FAILED"] = "1"
+        # Paid tests append their precise spend (millisats) here; summed below
+        # into token_consumed_msats so the UI shows sub-sat spend correctly.
+        scenario_env["SPEND_REPORT_PATH"] = str(artifacts_dir / SPEND_FILENAME)
         # ROU-153: real_upstream tests append per-call usage here so the
         # orchestrator can price actual spend from the provider catalog.
         if not upstream_plan.is_mock:
@@ -654,9 +679,17 @@ def orchestrate(
             except Exception as exc:
                 _log(f"compose down failed: {exc!r}")
 
+        # Precise per-request spend reported by paid tests (millisats).
+        token_consumed_msats = _sum_spend_msats(artifacts_dir / SPEND_FILENAME)
+
         token_consumed_sats = 0
         if balance_before is not None and balance_after is not None:
             token_consumed_sats = max(0, balance_before - balance_after)
+        # Fall back to the reported spend when the routstrd balance probe was
+        # skipped (services_required=false) or didn't move (tests pay a node
+        # directly), so the UI reflects the real spend instead of 0.
+        if token_consumed_sats == 0:
+            token_consumed_sats = token_consumed_msats // 1000
 
         _finalize_run(
             engine,
@@ -665,11 +698,13 @@ def orchestrate(
             vendor_commits=vendor_commits,
             error_message=error_message,
             token_consumed_sats=token_consumed_sats,
+            token_consumed_msats=token_consumed_msats,
             upstream_actual_cost_usd=upstream_actual_cost,
         )
         _log(
             f"run #{run_id} status={overall_status} "
             f"consumed_sats={token_consumed_sats} "
+            f"consumed_msats={token_consumed_msats} "
             f"upstream={upstream_plan.profile} "
             f"commits={list(vendor_commits)}"
         )

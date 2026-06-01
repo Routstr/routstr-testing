@@ -16,6 +16,8 @@ import os
 import httpx
 import pytest
 
+from tests.integration import spend
+
 NODE_A_EXTERNAL = "http://localhost:8001"
 API_KEY = os.environ.get("NODE_A_API_KEY", "").strip()
 
@@ -34,6 +36,19 @@ MODELS = [
 pytestmark = pytest.mark.requires_funded_daemon
 
 
+def _api_key_balance_msat() -> int | None:
+    """Remaining balance (msat) on the funded api key, or None if unavailable."""
+    try:
+        r = httpx.get(
+            f"{NODE_A_EXTERNAL}/v1/wallet/info",
+            headers={"Authorization": f"Bearer {API_KEY}"},
+            timeout=10,
+        )
+        return r.json().get("balance") if r.status_code == 200 else None
+    except (httpx.HTTPError, ValueError):
+        return None
+
+
 @pytest.fixture(scope="module", autouse=True)
 def _require_funded():
     if not API_KEY:
@@ -43,6 +58,13 @@ def _require_funded():
             pytest.skip("node-a not reachable; run `make up`")
     except httpx.HTTPError:
         pytest.skip("node-a not reachable; run `make up`")
+
+    # Report the real spend (msat) across the module so the run shows it.
+    start = _api_key_balance_msat()
+    yield
+    end = _api_key_balance_msat()
+    if start is not None and end is not None and start > end:
+        spend.record_msats(start - end)
 
 
 @pytest.mark.parametrize("model", MODELS)

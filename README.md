@@ -17,14 +17,29 @@ and writes `vendor/COMMITS.txt` with the pinned commit hashes.
 
 ```bash
 cp .env.example .env
-# Edit .env and set E2E_CASHU_TOKEN if running payment tests
 ```
+
+Set in `.env` (all gitignored):
+
+- `E2E_CASHU_TOKEN` — a funded cashu token, for payment tests.
+- `CASHU_MINTS` — the mint the token is from (e.g. `https://mint.chorus.community`). Both nodes must trust it.
+- `OPENROUTER_API_KEY` (+ optional `OPENROUTER_REFERER`) — to point the nodes at a real upstream. The node auto-seeds an `openrouter` provider at startup when this is present.
+- `NODE_A_ADMIN_PASSWORD` / `NODE_B_ADMIN_PASSWORD` — admin password per node (default `test-admin-pw`), needed for `routstr-cli` config.
 
 ### 3. Start services
 
 ```bash
 make up
 ```
+
+> The `webui` compose service currently fails to build (corepack/pnpm on the
+> node20 base image), which aborts `make up`. Bring up only the core services
+> until that's fixed, and build the UI on the host (node 22 / pnpm 10) instead:
+>
+> ```bash
+> docker compose up -d --build relay mock-openai node-a node-b routstrd cli-runner
+> # UI: make serve  (host build, single origin :8000 — see "Deploying the Web UI")
+> ```
 
 ### 4. Run tests
 
@@ -149,6 +164,69 @@ gains an "Upstream" column; the Run detail shows the resolved profile and the
 estimated / actual USD spend. See [`providers/README.md`](providers/README.md)
 to add a provider.
 
+## Routing + payment scenarios
+
+Beyond the smoke / real-upstream scenarios, the harness ships integration
+scenarios under `tests/integration/` (driven via the orchestrator, results in
+`runs.db` + the Runs UI). The stack must be up (`make up`) and `KEEP_UP=1` is
+recommended so the orchestrator runs pytest against the already-running stack.
+
+### Cheapest-provider routing (`routstrd_cheapest`)
+
+routstrd discovers nodes from the Nostr relay and routes each request to the
+**cheapest** node that serves the model (lowest `provider_fee`, exposed at
+`GET /models/<id>/providers`, sorted by `sats_pricing.max_cost`). The scenario
+sets per-node fees with `routstr-cli` and asserts the ranking follows:
+
+```bash
+SKIP_SYNC=1 KEEP_UP=1 python -m runner.orchestrate --scenario routstrd_cheapest --token placeholder
+```
+
+Fee update via CLI (what the test does):
+
+```bash
+docker exec routstr-testing-cli-runner-1 bun /app/dist/index.js \
+  --node http://node-a:8000 providers update 1 -t <admin-token> --fee 0.3
+```
+
+> **Relay isolation:** the bundled `@routstr/sdk` hardcodes public discovery
+> relays with no env override, so an unpatched daemon discovers the *global*
+> routstr network. `vendor-dockerfiles/routstrd.Dockerfile` rewrites those to
+> the local `ws://relay:8080` so only `node-a`/`node-b` are discovered.
+
+### Real paid inference (`real_inference`)
+
+Real `/v1/chat/completions` across many models through a node, paid from a
+funded ecash balance (ecash → node → openrouter → completion). Provide a funded
+node api-key (or cashu token) via `NODE_A_API_KEY`:
+
+```bash
+NODE_A_API_KEY=sk-... SKIP_SYNC=1 KEEP_UP=1 \
+python -m runner.orchestrate --scenario real_inference --token placeholder
+```
+
+### X-Cashu pay-per-request (`xcashu`)
+
+Single-use ecash: send `X-Cashu: <token>` (no auth); the node redeems, charges
+exact cost, and returns change in the `X-Cashu` response header. Provide one
+funded token per model (plus one for the change test) via `X_CASHU_TOKENS`
+(comma-separated):
+
+```bash
+X_CASHU_TOKENS=cashuB...,cashuB...,... SKIP_SYNC=1 KEEP_UP=1 \
+python -m runner.orchestrate --scenario xcashu --token placeholder
+```
+
+### Spend telemetry
+
+Node billing is sub-sat (millisats), so the Runs table renders precise spend:
+paid tests append their spend to `$SPEND_REPORT_PATH` (set automatically by the
+orchestrator); the run records `token_consumed_msats` and the UI shows e.g.
+`349 msat` or `4 sats` instead of a rounded `0 sats`. See
+[`docs/PLAN-full-node-coverage.md`](docs/PLAN-full-node-coverage.md) for the
+full status, findings, and known vendor bugs (incl. a node refund/X-Cashu
+change-retention fund leak — avoid repeated real-money runs until fixed).
+
 ## Deploying the Web UI for testing
 
 The Run modal (cashu token + provider keys, target/upstream profile) and the
@@ -189,8 +267,9 @@ and never persisted or echoed (`tests/test_server_token_hygiene.py`).
 | `mock-openai`| WireMock-based OpenAI API mock                   |
 | `node-a`     | routstr-core node A                              |
 | `node-b`     | routstr-core node B                              |
-| `routstrd`   | routstrd daemon connected to relay + mock-openai |
+| `routstrd`   | routstrd daemon; discovery relay-isolated to local `relay` (override Dockerfile adds sqlite + `cocod` wallet) |
 | `cli-runner` | routstr-cli test runner container                |
+| `webui`      | Vite + React UI (Docker build currently broken — build on host) |
 
 ## Directory layout
 
@@ -213,8 +292,13 @@ runner/           # scenario-driven orchestrator
 providers/        # upstream provider profiles + curated model catalogs
   <id>.yaml       # one per provider (openai, anthropic, ...)
   models/<id>.json
-scenarios/        # YAML scenario library (smoke.yaml, ...)
+scenarios/        # YAML scenario library (smoke, routstrd_cheapest, real_inference, xcashu, ...)
 tests/            # pytest suite driven by the orchestrator
+  cli/            # routstr-cli tests (via docker exec)
+  integration/    # routing + paid scenarios (cheapest, real_inference, xcashu) + spend helper
+vendor-dockerfiles/ # local Dockerfile overrides (routstr-cli, routstrd: sqlite + cocod + relay isolation)
+docs/             # status / plan / findings (PLAN-full-node-coverage.md)
+webui/            # Vite + React UI (build on host: pnpm install && pnpm build)
 compose.yml
 Makefile
 pyproject.toml    # runner dependencies (sqlmodel, pyyaml, pytest, ...)

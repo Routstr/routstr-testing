@@ -6,6 +6,18 @@ import { StatusBadge } from '@/components/StatusBadge';
 
 type ProfileFilter = 'all' | TargetProfile;
 
+// Node billing is sub-sat, so render the precise millisat spend: whole sats
+// once it reaches 1 sat, otherwise milli-sats (avoids the misleading "0 sats").
+export function formatSpend(msats: number, sats: number): string {
+  const m = msats || (sats || 0) * 1000;
+  if (m <= 0) return '0 sats';
+  if (m >= 1000) {
+    const s = m / 1000;
+    return `${Number.isInteger(s) ? s : s.toFixed(3)} sats`;
+  }
+  return `${m} msat`;
+}
+
 function TargetProfileBadge({ profile }: { profile: TargetProfile }) {
   const tone =
     profile === 'remote'
@@ -118,7 +130,7 @@ export function RunsPage() {
                   : '—'}
               </td>
               <td className='py-2 text-xs text-slate-600'>
-                {run.token_consumed_sats ?? '—'} sats
+                {formatSpend(run.token_consumed_msats, run.token_consumed_sats)}
               </td>
               <td className='py-2'>
                 <Link

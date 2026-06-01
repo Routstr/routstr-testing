@@ -65,6 +65,9 @@ class RunSummary(BaseModel):
     started_at: datetime
     finished_at: Optional[datetime] = None
     token_consumed_sats: int = 0
+    # Precise spend in millisats (node billing is sub-sat, so the integer sats
+    # field rounds tiny real spends to 0). The UI renders this.
+    token_consumed_msats: int = 0
     # ROU-151 — `local` (default) or `remote`. Surfaced so the Runs table
     # can render a badge / filter without needing the detail endpoint.
     target_profile: str = "local"

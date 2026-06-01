@@ -23,6 +23,7 @@ export interface Run {
   started_at: string;
   finished_at: string | null;
   token_consumed_sats: number;
+  token_consumed_msats: number;
   target_profile: TargetProfile;
   remote_node_urls: string[] | null;
   upstream_profile: string;

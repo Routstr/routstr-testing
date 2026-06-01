@@ -51,6 +51,10 @@ class Run(SQLModel, table=True):
     status: str = Field(default="running")  # running|passed|failed|error
     vendor_commits_json: Optional[str] = None
     token_consumed_sats: int = 0
+    # Precise spend in millisats. Node billing is sub-sat (msat), so the
+    # integer `token_consumed_sats` rounds tiny real spends to 0; this column
+    # preserves the exact amount tests report via the spend-report file.
+    token_consumed_msats: int = 0
     artifacts_dir: Optional[str] = None
     error_message: Optional[str] = None
     # ROU-151: target-profile dimensions surfaced in the Runs UI.
@@ -102,6 +106,10 @@ _RUNS_LATER_COLUMNS: tuple[tuple[str, str], ...] = (
     (
         "upstream_actual_cost_usd",
         "ALTER TABLE runs ADD COLUMN upstream_actual_cost_usd REAL",
+    ),
+    (
+        "token_consumed_msats",
+        "ALTER TABLE runs ADD COLUMN token_consumed_msats INTEGER NOT NULL DEFAULT 0",
     ),
 )
 
