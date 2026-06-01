@@ -1,0 +1,21 @@
+id: real_inference
+name: Real paid inference across models (openrouter via ecash)
+description: >
+  Drives real /v1/chat/completions through node-a (upstream openrouter,
+  operator's own key) for a spread of models, paid from a funded ecash balance.
+  Proves the full money path: ecash -> node -> openrouter -> completion.
+  Requires NODE_A_API_KEY (a funded node key or cashu token) in the environment.
+
+services_required: false
+target_profile: local
+upstream_profile: openrouter
+
+selection:
+  paths:
+    - tests/integration/test_real_inference.py
+  markers:
+    - requires_funded_daemon
+
+expected_cost_sats: 5
+estimated_upstream_cost_usd: 0.01
+timeout_seconds: 300

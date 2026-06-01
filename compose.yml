@@ -44,6 +44,10 @@ services:
       - UPSTREAM_API_KEY=${UPSTREAM_API_KEY:-test-key}
       - MODELS_PATH=${UPSTREAM_MODELS_PATH:-models.json}
       - CASHU_MINTS=${CASHU_MINTS:-https://testnut.cashu.space}
+      # OpenRouter upstream — node auto-seeds an openrouter provider row when
+      # OPENROUTER_API_KEY is present at startup (default provider_fee 1.01).
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_REFERER=${OPENROUTER_REFERER:-https://routstr-testing.local}
       - ADMIN_PASSWORD=${NODE_A_ADMIN_PASSWORD:-test-admin-pw}
       - NAME=NodeA
       - DESCRIPTION=Test node A
@@ -71,7 +75,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/v1/info"]
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/v1/info').status==200 else 1)"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -90,6 +94,9 @@ services:
       - UPSTREAM_API_KEY=${UPSTREAM_API_KEY:-test-key}
       - MODELS_PATH=${UPSTREAM_MODELS_PATH:-models.json}
       - CASHU_MINTS=${CASHU_MINTS:-https://testnut.cashu.space}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_REFERER=${OPENROUTER_REFERER:-https://routstr-testing.local}
+      - ADMIN_PASSWORD=${NODE_B_ADMIN_PASSWORD:-test-admin-pw}
       - NAME=NodeB
       - DESCRIPTION=Test node B
       - NPUB=${NODE_B_NPUB:-npub1ccz8l9zpa47k6vz9gphftsrumpw80rjt3nhnefat4symjhrsnmjs38mnyd}
@@ -113,7 +120,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/v1/info"]
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/v1/info').status==200 else 1)"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -124,15 +131,19 @@ services:
   routstrd:
     build:
       context: vendor/routstrd
-      dockerfile: Dockerfile
+      dockerfile: ../../vendor-dockerfiles/routstrd.Dockerfile
     ports:
       - "8091:8008"
     environment:
       - RELAY_URL=ws://relay:8080
+    # No --provider: that flag pins deps.provider as the default forcedProvider
+    # for every request, bypassing price-based discovery. Omitting it lets
+    # routstrd discover both nodes via the relay and route to the cheapest
+    # (lowest provider_fee) provider that serves the requested model.
     command:
       - "sh"
       - "-c"
-      - "bun run dist/daemon/index.js --port 8008 --provider http://node-a:8000"
+      - "bun run dist/daemon/index.js --port 8008"
     depends_on:
       relay:
         condition: service_healthy

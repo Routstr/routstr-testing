@@ -1,0 +1,22 @@
+id: routstrd_cheapest
+name: routstrd cheapest-provider routing (multi-model)
+description: >
+  Intensive sweep of routstrd price-based routing across a spread of models and
+  both fee regimes. For each model the daemon must rank the cheaper of
+  node-a / node-b first, and the ranking must follow a `routstr-cli providers
+  update --fee` change (node-a cheapest, then flipped to node-b cheapest).
+  Exercises discovery + pricing only (no paid inference) so it needs no funding.
+
+# Stack is brought up out-of-band (`make up`); the orchestrator only runs pytest
+# against it and records results. Avoids recreating the compose topology.
+services_required: false
+target_profile: local
+upstream_profile: mock
+
+selection:
+  paths:
+    - tests/integration/test_routstrd_cheapest.py
+
+expected_cost_sats: 0
+estimated_upstream_cost_usd: 0.0
+timeout_seconds: 300
