@@ -1,4 +1,4 @@
-.PHONY: sync up down test logs orchestrate smoke dump-logs server server-test
+.PHONY: sync up down test logs orchestrate smoke dump-logs server server-test webui-build serve
 
 E2E_TIMEOUT ?= 60
 
@@ -58,6 +58,19 @@ smoke:
 # Override host/port at the CLI:  make server HOST=0.0.0.0 PORT=8000
 server:
 	uvicorn server.main:app --reload --host $(or $(HOST),127.0.0.1) --port $(or $(PORT),8000)
+
+# Build the React UI into webui/dist so the server can serve it on one origin.
+webui-build:
+	cd webui && (corepack pnpm install --frozen-lockfile || pnpm install --frozen-lockfile) && \
+	  (corepack pnpm build || pnpm build)
+
+# One-command deployable: build the UI, then serve UI + /api on a single origin
+# (default 0.0.0.0:8000). Point a tunnel/reverse-proxy at this one port and the
+# whole harness — Scenarios, Runs, the Run modal (cashu token + provider keys)
+# — is reachable from a browser. Override host/port: make serve HOST=0.0.0.0 PORT=8000
+serve: webui-build
+	WEBUI_DIST_DIR=$(CURDIR)/webui/dist \
+	  uvicorn server.main:app --host $(or $(HOST),0.0.0.0) --port $(or $(PORT),8000)
 
 # Run only the server test suite (fast — no docker, no real subprocess).
 server-test:

@@ -149,6 +149,38 @@ gains an "Upstream" column; the Run detail shows the resolved profile and the
 estimated / actual USD spend. See [`providers/README.md`](providers/README.md)
 to add a provider.
 
+## Deploying the Web UI for testing
+
+The Run modal (cashu token + provider keys, target/upstream profile) and the
+Scenarios/Runs views can be driven entirely from a browser — no env-var token
+required. To stand up a browsable instance on one origin:
+
+```bash
+make serve              # builds webui/dist, serves UI + /api on 0.0.0.0:8000
+# open http://localhost:8000  → Scenarios → "Run scenario" → paste cashu token
+```
+
+`make serve` runs `webui-build` then launches the FastAPI server with
+`WEBUI_DIST_DIR` pointed at the build output, so the **same process serves both
+the React UI (`/`, with SPA deep-link fallback) and the `/api/*` backend**. One
+port means one tunnel / one reverse-proxy host exposes the whole harness:
+
+```bash
+# Public URL for a quick shared test (any tunnel works):
+ngrok http 8000         # → https://<id>.ngrok-free.app  (UI + API, same origin)
+# or put Caddy/nginx in front of :8000 on a host you control.
+```
+
+Because UI and API share an origin, the browser uses same-origin `fetch` and
+`VITE_API_BASE_URL` can stay empty. The cashu token and provider API keys are
+write-only — posted in the run body, forwarded to the orchestrator via env,
+and never persisted or echoed (`tests/test_server_token_hygiene.py`).
+
+> Run **execution** still needs the local docker compose stack (`make up`) for
+> `target_profile=local`, or reachable `remote` node URLs entered in the modal.
+> A persistent hosted deployment (containerized server with docker access) is
+> tracked separately — see the ROU-125 follow-up.
+
 ## Services
 
 | Service      | Description                                      |
