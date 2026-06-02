@@ -227,6 +227,33 @@ orchestrator); the run records `token_consumed_msats` and the UI shows e.g.
 full status, findings, and known vendor bugs (incl. a node refund/X-Cashu
 change-retention fund leak — avoid repeated real-money runs until fixed).
 
+### Against remote (deployed) nodes
+
+These scenarios resolve their targets through `tests/integration/targets.py`, so
+they run against deployed nodes too — add `--target-profile remote` and node
+URLs. URLs, the routstrd endpoint, admin tokens, and node identity all come from
+env; tests skip (not fail) when a piece is missing.
+
+```bash
+# real_inference / xcashu — just point at a deployed node and fund it:
+NODE_A_API_KEY=sk-... python -m runner.orchestrate --scenario real_inference \
+  --target-profile remote --remote-node-urls https://node1.example
+
+X_CASHU_TOKENS=cashuB...,... python -m runner.orchestrate --scenario xcashu \
+  --target-profile remote --remote-node-urls https://node1.example
+
+# routstrd_cheapest — needs 2 nodes you can admin + a reachable routstrd + cli-runner:
+ROUTSTRD_URL=https://routstrd.example \
+REMOTE_NODE_ADMIN_TOKEN_0=tok0 REMOTE_NODE_ADMIN_TOKEN_1=tok1 \
+python -m runner.orchestrate --scenario routstrd_cheapest \
+  --target-profile remote --remote-node-urls https://node1.example,https://node2.example
+```
+
+Env knobs (else local defaults `:8001/:8002`, `:8091`, docker `node-a`/`node-b`,
+password login): `REMOTE_NODE_URLS`, `REMOTE_NODE_ADMIN_TOKEN_<i>`,
+`ROUTSTRD_URL`, `CLI_CONTAINER`. The cheapest test identifies the serving node by
+URL host (works with any remote URL), not a hardcoded `node-a`.
+
 ## Deploying the Web UI for testing
 
 The Run modal (cashu token + provider keys, target/upstream profile) and the

@@ -16,9 +16,9 @@ import os
 import httpx
 import pytest
 
-from tests.integration import spend
+from tests.integration import spend, targets
 
-NODE_A_EXTERNAL = "http://localhost:8001"
+NODE_A_EXTERNAL = targets.node_api_url(0)  # local :8001 or first remote node
 API_KEY = os.environ.get("NODE_A_API_KEY", "").strip()
 
 MODELS = [

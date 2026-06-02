@@ -22,9 +22,9 @@ import os
 import httpx
 import pytest
 
-from tests.integration import spend
+from tests.integration import spend, targets
 
-NODE_A_EXTERNAL = "http://localhost:8001"
+NODE_A_EXTERNAL = targets.node_api_url(0)  # local :8001 or first remote node
 TOKENS = [t.strip() for t in os.environ.get("X_CASHU_TOKENS", "").split(",") if t.strip()]
 
 # One funded token per model (cheap models so a small token covers max_cost).
