@@ -28,6 +28,11 @@ NODE_VENV_PYTHON = "/.venv/bin/python"
 NODE = targets.node_api_url(0)
 TOKEN_SATS = 32
 BEARER_SATS = 64  # comfortably above any input-fee floor for the key-identity token
+# A deliberately large face value: the wallet mints it into many small proofs, so
+# the mint's NUT-02 per-proof input fee rounds up to a clearly non-zero sat amount
+# (these FakeWallet mints charge input_fee_ppk=100), giving the input-fee tests an
+# unambiguous signal rather than a 1-sat rounding edge.
+FEE_TOKEN_SATS = 2047
 
 # Fund a wallet at MINT_URL for AMOUNT sat and print the serialized token.
 # include_dleq=True: the node runs verify_proofs_dleq on same-mint receive, so a
@@ -48,14 +53,17 @@ async def main():
         await asyncio.sleep(0.5)  # let FakeWallet settle the invoice
         proofs = await w.mint(amount, quote_id=quote.quote)
         token = await w.serialize_proofs(proofs, include_dleq=True, legacy=True)
+        # The mint's own NUT-02 input fee for these proofs (sat), computed by the
+        # same cashu lib the node uses on receive — this is the ground truth the
+        # node's credit must match, derived independently of routstr's code.
+        print("FEE:" + str(w.get_fees_for_proofs(proofs)))
         print("TOKEN:" + token)
 
 asyncio.run(main())
 """
 
 
-def mint_token(mint_internal_url: str, amount: int) -> str:
-    """Mint `amount` sat at `mint_internal_url` and return the serialized token."""
+def _run_mint(mint_internal_url: str, amount: int) -> str:
     try:
         r = subprocess.run(
             [
@@ -73,10 +81,38 @@ def mint_token(mint_internal_url: str, amount: int) -> str:
         pytest.skip(f"cannot mint test token (docker/{NODE_CONTAINER} unavailable): {exc}")
     if r.returncode != 0:
         pytest.skip(f"mint helper failed (is {NODE_CONTAINER} up?): {r.stderr[-500:]}")
-    for line in r.stdout.splitlines():
-        if line.startswith("TOKEN:"):
-            return line[len("TOKEN:"):].strip()
-    pytest.skip(f"no token in mint output: {r.stdout[-300:]}")
+    return r.stdout
+
+
+def _parse(stdout: str, prefix: str) -> str | None:
+    for line in stdout.splitlines():
+        if line.startswith(prefix):
+            return line[len(prefix):].strip()
+    return None
+
+
+def mint_token(mint_internal_url: str, amount: int) -> str:
+    """Mint `amount` sat at `mint_internal_url` and return the serialized token."""
+    stdout = _run_mint(mint_internal_url, amount)
+    token = _parse(stdout, "TOKEN:")
+    if token is None:
+        pytest.skip(f"no token in mint output: {stdout[-300:]}")
+    return token
+
+
+def mint_token_with_fee(mint_internal_url: str, amount: int) -> tuple[str, int]:
+    """Mint `amount` sat and return (token, input_fee_sat).
+
+    The input fee is the mint's own NUT-02 per-proof charge for this token's
+    proofs, computed by the cashu lib (the ground truth the node must deduct on
+    receive), not by routstr's code under test.
+    """
+    stdout = _run_mint(mint_internal_url, amount)
+    token = _parse(stdout, "TOKEN:")
+    fee = _parse(stdout, "FEE:")
+    if token is None or fee is None:
+        pytest.skip(f"no token/fee in mint output: {stdout[-300:]}")
+    return token, int(fee)
 
 
 def topup(cashu_token: str, bearer: str) -> httpx.Response:
