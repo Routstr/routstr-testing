@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import desc
 from sqlmodel import select
@@ -327,11 +327,21 @@ def spawn_orchestrator(
         text=True,
         timeout=int(env.get("SERVER_ORCHESTRATE_TIMEOUT", "1800")),
     )
-    if proc.returncode != 0:
-        raise OrchestratorError(
-            f"orchestrator exited {proc.returncode}: {proc.stderr.strip()[:400]}"
-        )
-    return _parse_run_id(proc.stdout)
+    # The orchestrator now exits non-zero when a scenario's tests fail/error
+    # (so CLI/CI can gate on the exit code). For the UI that is still a
+    # *recorded* run — the run row exists with status=failed/error and should
+    # be returned so the UI can show it. A non-zero exit with NO run_id summary
+    # line means the orchestrator never recorded a run (e.g. config error) — a
+    # true failure we surface as an OrchestratorError.
+    try:
+        return _parse_run_id(proc.stdout)
+    except OrchestratorError:
+        if proc.returncode != 0:
+            raise OrchestratorError(
+                f"orchestrator exited {proc.returncode}: "
+                f"{proc.stderr.strip()[:400]}"
+            ) from None
+        raise
 
 
 def _parse_run_id(stdout: str) -> int:

@@ -7,7 +7,6 @@ the token into the runs table or a log handler.
 from __future__ import annotations
 
 import sqlite3
-import subprocess
 import sys
 import textwrap
 from pathlib import Path
@@ -43,7 +42,6 @@ def test_no_token_column_on_runs_table(config):
     """Hard schema check: there must be no column whose name suggests
     storage of the cashu token on the `runs` table.
     """
-    engine = get_engine(config.db_path)
     with sqlite3.connect(config.db_path) as conn:
         cols = [row[1] for row in conn.execute("PRAGMA table_info(runs)").fetchall()]
     banned = {"cashu_token", "token", "cashutoken"}
@@ -149,8 +147,8 @@ def test_token_not_on_argv_when_spawning_orchestrator(tmp_path: Path):
 
     text = capture.read_text()
     assert "argv=" in text and "env=" in text
-    argv_line = [l for l in text.splitlines() if l.startswith("argv=")][0]
-    env_line = [l for l in text.splitlines() if l.startswith("env=")][0]
+    argv_line = [ln for ln in text.splitlines() if ln.startswith("argv=")][0]
+    env_line = [ln for ln in text.splitlines() if ln.startswith("env=")][0]
     assert TOKEN not in argv_line, "token was passed on argv — never do this"
     assert TOKEN in env_line, "token must be passed via E2E_CASHU_TOKEN"
 

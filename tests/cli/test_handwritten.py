@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from tests.cli.helpers import run_cli, NODE_A_INTERNAL
+from tests.cli.helpers import run_cli
 
 # CLI side-effects here are local config writes (init/instruct/show) — they
 # don't mutate the routstr node — so the whole module is safe to point at a

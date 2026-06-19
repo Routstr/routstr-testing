@@ -14,8 +14,30 @@ dependencies = [
     "uvicorn>=0.27",
 ]
 
+[dependency-groups]
+# Tooling the no-docker `pr` CI lane runs (ruff + mypy). Pinned and declared
+# here so CI is hermetic (`uv sync --group dev`) instead of leaking whatever
+# ruff/mypy happen to be on a contributor's PATH. types-PyYAML supplies the
+# stubs mypy needs for runner/{providers,scenario}.py.
+dev = [
+    "ruff==0.1.7",
+    "mypy==1.9.0",
+    "types-PyYAML>=6.0",
+]
+
 [tool.setuptools]
 packages = ["runner", "server", "tests"]
+
+[tool.mypy]
+# The no-docker CI lane type-checks the money-path orchestrator package
+# (runner/) only. server/ uses idiomatic SQLModel query expressions that
+# trip SQLAlchemy's typing overloads — out of scope for this lane.
+python_version = "3.11"
+files = ["runner"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
 
 [tool.pytest.ini_options]
 markers = [

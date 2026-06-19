@@ -27,7 +27,6 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 from sqlmodel import select
 
@@ -830,10 +829,33 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[orchestrate] upstream config error: {exc}", file=sys.stderr)
         return 2
 
+    # The run row carries the authoritative outcome. CI lanes drive this
+    # entry point and gate on the *process exit code*, so a scenario whose
+    # tests failed (status=failed) or that errored (status=error, e.g. no
+    # tests collected / compose failure / timeout) MUST surface as a non-zero
+    # exit. Otherwise a money-path guard lane silently passes while the
+    # swap/refund logic under test is red.
+    status = _read_run_status(Path(args.db), run_id)
+
     # Echo a machine-friendly summary so callers (FastAPI server in ROU-134)
     # can pick up the new run id without re-querying SQLite.
-    print(json.dumps({"run_id": run_id, "db": args.db}))
+    print(json.dumps({"run_id": run_id, "db": args.db, "status": status}))
+
+    if status in {"failed", "error"}:
+        print(
+            f"[orchestrate] run #{run_id} status={status} → exit 1",
+            file=sys.stderr,
+        )
+        return 1
     return 0
+
+
+def _read_run_status(db_path: Path, run_id: int) -> str | None:
+    """Read the finalized status of a run row (CI exit-code source)."""
+    engine = get_engine(db_path)
+    with get_session(engine) as session:
+        row = session.get(Run, run_id)
+        return row.status if row is not None else None
 
 
 if __name__ == "__main__":
