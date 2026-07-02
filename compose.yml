@@ -78,6 +78,33 @@ services:
       timeout: 3s
       retries: 12
 
+  # A second TRUSTED mint that DOES charge a NUT-02 input fee (ppk=100), unlike
+  # the zero-fee primary-mint. The node trusts it (it's in CASHU_MINTS) but it is
+  # not primary, so a token from it takes the trusted same-mint redeem path while
+  # actually charging a per-proof input fee — the exact condition
+  # test_topup_input_fee.py needs to prove the node credits face - input_fee.
+  # Distinct key => distinct keyset, so its proofs never collide with the other
+  # mints' on the node's per-keyset secret derivation.
+  fee-mint:
+    image: *nutshell-image
+    ports:
+      - "3342:3338"
+    environment:
+      - MINT_BACKEND_BOLT11_SAT=FakeWallet
+      - MINT_LISTEN_HOST=0.0.0.0
+      - MINT_LISTEN_PORT=3338
+      - MINT_PRIVATE_KEY=routstr-testing-fee-mint-fixed-key
+      # Non-zero input fee on purpose (the only mint here that charges one), so a
+      # trusted redeem of its tokens loses the per-proof fee.
+      - MINT_INPUT_FEE_PPK=100
+    command: ["python", "-m", "cashu.mint"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:3338/v1/info').status==200 else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
   # Dedicated backing mint for the fault-proxy (Phase 2). Kept separate from
   # foreign-mint with its own key so it has a DISTINCT keyset: the node derives
   # blinded secrets per keyset, so a separate keyset prevents collisions with
@@ -144,12 +171,15 @@ services:
       - UPSTREAM_BASE_URL=${UPSTREAM_BASE_URL:-http://mock-openai:3000}
       - UPSTREAM_API_KEY=${UPSTREAM_API_KEY:-test-key}
       - MODELS_PATH=${UPSTREAM_MODELS_PATH:-models.json}
-      # Trust ONLY the in-stack primary mint by default. This is a hermetic
-      # local topology: primary-mint/foreign-mint are defined right here, so an
-      # external testnut default was a footgun — it let the node trust the wrong
-      # mint and made the foreign-mint swap collapse into a same-mint redeem.
+      # Trust the in-stack mints by default. This is a hermetic local topology:
+      # primary-mint/foreign-mint are defined right here, so an external testnut
+      # default was a footgun — it let the node trust the wrong mint and made the
+      # foreign-mint swap collapse into a same-mint redeem. primary-mint is FIRST
+      # so it stays the swap target (cashu_mints[0]); fee-mint is also trusted so
+      # its fee-charging tokens take the trusted redeem path (input-fee test).
+      # foreign-mint stays untrusted on purpose (it must trigger the swap).
       # Override with CASHU_MINTS=... for scenarios that need a different mint.
-      - CASHU_MINTS=${CASHU_MINTS:-http://primary-mint:3338}
+      - CASHU_MINTS=${CASHU_MINTS:-http://primary-mint:3338,http://fee-mint:3338}
       # OpenRouter upstream — node auto-seeds an openrouter provider row when
       # OPENROUTER_API_KEY is present at startup (default provider_fee 1.01).
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
@@ -199,8 +229,8 @@ services:
       - UPSTREAM_BASE_URL=${UPSTREAM_BASE_URL:-http://mock-openai:3000}
       - UPSTREAM_API_KEY=${UPSTREAM_API_KEY:-test-key}
       - MODELS_PATH=${UPSTREAM_MODELS_PATH:-models.json}
-      # Trust ONLY the in-stack primary mint by default (see node-a for why).
-      - CASHU_MINTS=${CASHU_MINTS:-http://primary-mint:3338}
+      # Trust the in-stack primary + fee mints by default (see node-a for why).
+      - CASHU_MINTS=${CASHU_MINTS:-http://primary-mint:3338,http://fee-mint:3338}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - OPENROUTER_REFERER=${OPENROUTER_REFERER:-https://routstr-testing.local}
       - ADMIN_PASSWORD=${NODE_B_ADMIN_PASSWORD:-test-admin-pw}

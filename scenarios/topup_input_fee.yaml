@@ -1,0 +1,27 @@
+id: topup_input_fee
+name: Trusted-mint input fee on wallet topup
+description: >
+  Exercises routstr-core's trusted same-mint receive (recieve_token) end to end:
+  a Cashu token from a TRUSTED mint that charges a NUT-02 per-proof input fee
+  (the in-stack fee-mint, input_fee_ppk=100) is topped up via
+  POST /v1/wallet/topup. The node does not swap — it redeems same-mint with
+  include_fees=True, so it only holds face - input_fee and must credit exactly
+  that, not the full face value (which would over-credit and drift the node
+  toward insolvency). A many-proof token makes the per-proof fee a clearly
+  non-zero sat amount. Real Cashu crypto, zero real sats.
+
+# Orchestrator provisions the stack; a missing service then fails the run
+# instead of silently skipping (SERVICES_REQUIRED=1).
+services_required: true
+target_profile: local
+upstream_profile: mock
+
+selection:
+  paths:
+    - tests/integration/test_topup_input_fee.py
+  markers:
+    - destructive
+
+expected_cost_sats: 0
+estimated_upstream_cost_usd: 0.0
+timeout_seconds: 180
