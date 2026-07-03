@@ -28,13 +28,12 @@ import httpx
 import pytest
 
 from tests.integration import node_boot
+from tests.integration.targets import bearer_headers, mint_admin_token
 
 pytestmark = pytest.mark.destructive
 
-# Matches the compose node-a default so the encrypted blob is readable the same way.
-FERNET_KEY = "W5PvCGEnbMTde00OFubyfhPPO2-f6aQP5ullyqoBfRQ="
 # A second, unmistakably different valid Fernet key (urlsafe-b64 of 32 zero bytes),
-# used to prove a key change bricks the node.
+# used to prove a key change bricks the node (vs node_boot.COMPOSE_SECRET_KEY).
 FERNET_KEY_2 = "A" * 43 + "="
 # A valid 64-char hex private key the node's nsec parser accepts like a bech32 nsec.
 SEED_NSEC = "1" * 64
@@ -47,10 +46,6 @@ _GENERATED_PW = re.compile(r"shown only now\):\s*(\S+)")
 @pytest.fixture(autouse=True)
 def _local_docker() -> None:
     node_boot.require_local_docker()
-
-
-def _bearer(token: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {token}"}
 
 
 def test_node_refuses_to_boot_without_secret_key() -> None:
@@ -86,7 +81,7 @@ def test_first_run_generates_and_logs_admin_password() -> None:
     URL (the first-run UX — there is no setup screen). The logged password must
     actually authenticate. Pre-#553 there is no such generated-password log.
     """
-    env = {**node_boot.base_node_env(), "ROUTSTR_SECRET_KEY": FERNET_KEY}
+    env = {**node_boot.base_node_env(), "ROUTSTR_SECRET_KEY": node_boot.COMPOSE_SECRET_KEY}
     # No ADMIN_PASSWORD, no NSEC.
     with node_boot.throwaway_volume() as vol, node_boot.serving_node(
         env, volume=vol
@@ -101,7 +96,7 @@ def test_first_run_generates_and_logs_admin_password() -> None:
         assert "/admin" in logs, (
             f"the first-run log must point the operator at the admin URL:\n{logs[-1500:]}"
         )
-        token = node_boot.admin_login(node.base_url, generated)
+        token = mint_admin_token(node.base_url, generated)
         assert token, "the generated admin password must actually log in"
 
 
@@ -114,9 +109,9 @@ def test_key_change_bricks_encrypted_nsec() -> None:
     """
     base = node_boot.base_node_env()
     with node_boot.throwaway_volume() as vol:
-        # Boot 1: store the encrypted nsec under FERNET_KEY.
+        # Boot 1: store the encrypted nsec under the compose default key.
         with node_boot.serving_node(
-            {**base, "ROUTSTR_SECRET_KEY": FERNET_KEY, "NSEC": SEED_NSEC,
+            {**base, "ROUTSTR_SECRET_KEY": node_boot.COMPOSE_SECRET_KEY, "NSEC": SEED_NSEC,
              "ADMIN_PASSWORD": ADMIN_PW},
             volume=vol,
         ):
@@ -153,14 +148,14 @@ def test_encrypted_nsec_survives_second_boot_without_env_nsec() -> None:
     with node_boot.throwaway_volume() as vol:
         # Boot 1: NSEC supplied via env -> encrypted into the Secret store.
         with node_boot.serving_node(
-            {**base, "ROUTSTR_SECRET_KEY": FERNET_KEY, "NSEC": SEED_NSEC,
+            {**base, "ROUTSTR_SECRET_KEY": node_boot.COMPOSE_SECRET_KEY, "NSEC": SEED_NSEC,
              "ADMIN_PASSWORD": ADMIN_PW},
             volume=vol,
         ) as node1:
-            token1 = node_boot.admin_login(node1.base_url, ADMIN_PW)
+            token1 = mint_admin_token(node1.base_url, ADMIN_PW)
             assert token1, "boot-1 admin login (env password) must work"
             settings1 = httpx.get(
-                f"{node1.base_url}/admin/api/settings", headers=_bearer(token1), timeout=15
+                f"{node1.base_url}/admin/api/settings", headers=bearer_headers(token1), timeout=15
             ).json()
             assert settings1.get("nsec") == "[REDACTED]", (
                 f"boot 1 should hold the Nostr identity, got nsec={settings1.get('nsec')!r}"
@@ -170,13 +165,13 @@ def test_encrypted_nsec_survives_second_boot_without_env_nsec() -> None:
 
         # Boot 2: SAME volume + key, but NSEC removed from the env.
         with node_boot.serving_node(
-            {**base, "ROUTSTR_SECRET_KEY": FERNET_KEY, "ADMIN_PASSWORD": ADMIN_PW},
+            {**base, "ROUTSTR_SECRET_KEY": node_boot.COMPOSE_SECRET_KEY, "ADMIN_PASSWORD": ADMIN_PW},
             volume=vol,
         ) as node2:
-            token2 = node_boot.admin_login(node2.base_url, ADMIN_PW)
+            token2 = mint_admin_token(node2.base_url, ADMIN_PW)
             assert token2, "boot-2 admin login must still work after the env-less reboot"
             settings2 = httpx.get(
-                f"{node2.base_url}/admin/api/settings", headers=_bearer(token2), timeout=15
+                f"{node2.base_url}/admin/api/settings", headers=bearer_headers(token2), timeout=15
             ).json()
             assert settings2.get("nsec") == "[REDACTED]", (
                 "the Nostr identity was lost on the second boot once NSEC left the "

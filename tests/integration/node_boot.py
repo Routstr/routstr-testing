@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import tempfile
 import time
 import uuid
 from contextlib import contextmanager
@@ -33,8 +34,18 @@ from tests.integration.targets import is_remote, unavailable
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# A throwaway node serves on this host port (the compose stack never binds it).
-LIFECYCLE_PORT = 8077
+# Every ephemeral container carries this label so a hard-killed run's leftovers can
+# be found and reaped without ever touching the compose stack.
+_LIFECYCLE_LABEL = "routstr-lifecycle-e2e"
+
+# The in-container SQLite path the node writes to (see base_node_env's DATABASE_URL).
+# Single source of truth so the boot env and copy_db can't drift apart.
+_DB_PATH = "/data/node.db"
+
+# The Fernet key compose.yml bakes into node-a as its default. Tests that boot an
+# ephemeral node with an encrypted secret must use this exact key so the blob is
+# readable the same way the standing node reads it.
+COMPOSE_SECRET_KEY = "W5PvCGEnbMTde00OFubyfhPPO2-f6aQP5ullyqoBfRQ="
 
 
 def require_local_docker() -> None:
@@ -46,6 +57,26 @@ def require_local_docker() -> None:
         )
     if shutil.which("docker") is None:
         unavailable("docker CLI required to boot ephemeral nodes")
+    _reap_stale_lifecycle_nodes_once()
+
+
+@lru_cache(maxsize=1)
+def _reap_stale_lifecycle_nodes_once() -> None:
+    """Remove ephemeral nodes left behind by a previously hard-killed run.
+
+    Serving nodes now publish to an ephemeral host port (no fixed-port wedge), so a
+    leaked container can't block a fresh run; this just keeps dead containers from
+    piling up. Scoped to our label, so it never removes a compose service. Runs at
+    most once per process (``lru_cache``, matching ``_project_name``).
+    """
+    proc = subprocess.run(
+        ["docker", "ps", "-aq", "--filter", f"label={_LIFECYCLE_LABEL}"],
+        capture_output=True,
+        text=True,
+    )
+    ids = proc.stdout.split()
+    if ids:
+        subprocess.run(["docker", "rm", "-f", *ids], capture_output=True, text=True)
 
 
 def _compose(*args: str) -> subprocess.CompletedProcess[str]:
@@ -87,9 +118,16 @@ def base_node_env() -> dict[str, str]:
     ``NPUB`` — each test layers in exactly the secret env it is exercising (and
     proves the *absence* of one by leaving it out). ``DATABASE_URL`` points at the
     mounted ``/data`` volume so state persists across a paired reboot.
+
+    ``HTTP_URL`` is left at the node's ``http://localhost:8000`` sentinel on
+    purpose: a node treats that value as "no real endpoint" and skips the Nostr
+    listing publish entirely, so an ephemeral node carrying an nsec never announces
+    onto the shared ``relay`` (whose named volume would otherwise retain the dead
+    "LifecycleNode" listing for discovery scenarios on a reused stack). Clearing
+    ``RELAYS`` would be worse — an empty relay list falls back to *public* relays.
     """
     return {
-        "DATABASE_URL": "sqlite+aiosqlite:////data/node.db",
+        "DATABASE_URL": f"sqlite+aiosqlite:///{_DB_PATH}",
         "RELAYS": "ws://relay:8080",
         "UPSTREAM_BASE_URL": "http://mock-openai:3000",
         "UPSTREAM_API_KEY": "test-key",
@@ -123,21 +161,27 @@ class ServingNode:
         return _logs(self.cid)
 
 
-def _run_args(
-    env: dict[str, str], *, volume: str, host_port: int | None
-) -> list[str]:
-    args = ["docker", "run", "-d", "--network", compose_network(), "-v", f"{volume}:/data"]
-    if host_port is not None:
-        args += ["-p", f"{host_port}:8000"]
+def _run_args(env: dict[str, str], *, volume: str, publish: bool) -> list[str]:
+    args = [
+        "docker", "run", "-d",
+        "--label", _LIFECYCLE_LABEL,
+        "--network", compose_network(),
+        "-v", f"{volume}:/data",
+    ]
+    if publish:
+        # Publish to an ephemeral host port (``0`` = let docker pick a free one)
+        # rather than a fixed port, so a leaked container from a hard-killed run
+        # can never wedge later runs by holding the port.
+        args += ["-p", "0:8000"]
     for key, value in env.items():
         args += ["-e", f"{key}={value}"]
     args.append(node_image())
     return args
 
 
-def _docker_run(env: dict[str, str], *, volume: str, host_port: int | None) -> str:
+def _docker_run(env: dict[str, str], *, volume: str, publish: bool) -> str:
     proc = subprocess.run(
-        _run_args(env, volume=volume, host_port=host_port),
+        _run_args(env, volume=volume, publish=publish),
         cwd=str(_REPO_ROOT),
         capture_output=True,
         text=True,
@@ -147,6 +191,52 @@ def _docker_run(env: dict[str, str], *, volume: str, host_port: int | None) -> s
             f"failed to start ephemeral node: {(proc.stderr or proc.stdout)[:300]}"
         )
     return proc.stdout.strip()
+
+
+def _published_host_port(cid: str) -> int:
+    """Read back the ephemeral host port docker assigned to container port 8000."""
+    proc = subprocess.run(
+        ["docker", "port", cid, "8000"], capture_output=True, text=True
+    )
+    for line in proc.stdout.splitlines():
+        _, _, port = line.strip().rpartition(":")
+        if port.isdigit():
+            return int(port)
+    unavailable(
+        "could not determine the ephemeral node's published port: "
+        f"{(proc.stdout or proc.stderr)[:200]}"
+    )
+
+
+def copy_db(cid: str) -> bytes:
+    """Copy an ephemeral node's SQLite state off the container for at-rest inspection.
+
+    Reads ``_DB_PATH`` (the same path ``base_node_env``'s DATABASE_URL points at) plus
+    its ``-wal`` sidecar, and returns the concatenated bytes. The node runs SQLite in WAL
+    mode, so a freshly committed row lives in ``node.db-wal`` until it is checkpointed
+    into ``node.db``; copying only the main file would miss recent writes and report a
+    misleadingly clean database. The ``-wal`` may be absent (already checkpointed) —
+    that's fine, whatever is present is inspected. Must be called while ``cid`` is
+    still alive (i.e. inside the ``serving_node`` block).
+    """
+    blobs: list[bytes] = []
+    with tempfile.TemporaryDirectory() as tmp:
+        for suffix, required in (("", True), ("-wal", False)):
+            dest = Path(tmp) / f"node.db{suffix}"
+            proc = subprocess.run(
+                ["docker", "cp", f"{cid}:{_DB_PATH}{suffix}", str(dest)],
+                capture_output=True,
+                text=True,
+            )
+            if proc.returncode != 0 or not dest.exists():
+                if required:
+                    unavailable(
+                        "could not copy ephemeral node DB for at-rest inspection: "
+                        f"{(proc.stderr or proc.stdout)[:300]}"
+                    )
+                continue
+            blobs.append(dest.read_bytes())
+    return b"".join(blobs)
 
 
 def _logs(cid: str) -> str:
@@ -192,7 +282,7 @@ def boot_until_settled(
     (``exited=False``) — that is the signal a fail-fast did *not* happen. Either
     way the container is removed; the volume is the caller's to manage.
     """
-    cid = _docker_run(env, volume=volume, host_port=None)
+    cid = _docker_run(env, volume=volume, publish=False)
     try:
         deadline = time.time() + timeout
         while time.time() < deadline:
@@ -207,12 +297,12 @@ def boot_until_settled(
 
 @contextmanager
 def serving_node(
-    env: dict[str, str], *, volume: str, host_port: int = LIFECYCLE_PORT, timeout: int = 90
+    env: dict[str, str], *, volume: str, timeout: int = 90
 ) -> Iterator[ServingNode]:
     """Boot a node, wait until it serves ``/v1/info``, yield a handle, then tear it
     down. Fails (or skips, ad hoc) if it exits during boot or never comes up."""
-    cid = _docker_run(env, volume=volume, host_port=host_port)
-    base = f"http://localhost:{host_port}"
+    cid = _docker_run(env, volume=volume, publish=True)
+    base = f"http://localhost:{_published_host_port(cid)}"
     try:
         deadline = time.time() + timeout
         last_err = ""
@@ -232,18 +322,8 @@ def serving_node(
                 last_err = str(exc)
             time.sleep(1)
         unavailable(
-            f"ephemeral node never became reachable on :{host_port} ({last_err})\n"
+            f"ephemeral node never became reachable at {base} ({last_err})\n"
             f"{_logs(cid)[-1000:]}"
         )
     finally:
         _rm(cid)
-
-
-def admin_login(base_url: str, password: str) -> str | None:
-    """Mint an admin token from an ephemeral node, or None if login fails."""
-    try:
-        with httpx.Client(base_url=base_url, timeout=10) as client:
-            resp = client.post("/admin/api/login", json={"password": password})
-            return resp.json().get("token") if resp.status_code == 200 else None
-    except (httpx.HTTPError, ValueError):
-        return None
