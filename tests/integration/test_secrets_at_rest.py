@@ -4,81 +4,62 @@ Whole-system proof that operator-supplied secrets handed to a real node via
 container env (ADMIN_PASSWORD, NSEC) are migrated into the encrypted Secret store
 at boot, instead of living in plaintext in the editable settings blob:
 
-  * the admin password still authenticates (POST /admin/api/login) — the env seed
-    was hashed into the Secret store, not broken;
+  * the env-seeded admin password still authenticates (POST /admin/api/login) —
+    it was hashed into the Secret store, not broken;
   * ``admin_password`` is no longer an editable settings field (GET
     /admin/api/settings omits it — it became a one-way hash, not config);
   * the node exposes a dedicated nsec rotation endpoint (PATCH /admin/api/nsec)
     that derives the npub — the Nostr identity is a rotatable secret, not a blob
     field smuggled through the general settings PATCH;
-  * the plaintext admin password and nsec the operator supplied do NOT appear
-    anywhere in the node's on-disk SQLite database.
+  * neither the plaintext admin password, the seeded nsec, nor a freshly rotated
+    nsec appears anywhere in the node's on-disk SQLite database.
 
-These are whole-system behaviours the in-repo unit/integration tests can't prove:
-a real container boot (run_migrations -> bootstrap_secrets -> initialize ordering),
-real env-provided secrets, a real SQLite file on disk, and real HTTP through
-uvicorn.
+Each test boots its OWN throwaway node via ``node_boot`` (fresh volume, tailored
+env), the same ephemeral mechanism ``test_secret_lifecycle`` uses. These are
+boot-time / state-mutating behaviours (one rotates the identity), so they must run
+against a pristine per-test node rather than the shared standing ``node-a`` — that
+keeps each test order-independent, leaves no state to restore, and lets us seed the
+plaintext directly through the front door (no compose/pytest ``.env`` divergence).
 
 Discriminating: RED against a node that keeps secrets in the plaintext settings
 blob (pre-#553); GREEN once they move into the Fernet/scrypt-backed Secret store
-and ``admin_password`` leaves the settings model. Marked ``destructive`` (it
-rotates the node's nsec) so it auto-skips under TARGET_PROFILE=remote.
+and ``admin_password`` leaves the settings model. Marked ``destructive`` (needs
+local docker, not a deployed node): auto-skips under TARGET_PROFILE=remote.
 """
 from __future__ import annotations
-
-import os
-import pathlib
-import shutil
-import subprocess
 
 import httpx
 import pytest
 
-from tests.integration.targets import (
-    ADMIN_PASSWORD,
-    admin_token,
-    is_remote,
-    node_api_url,
-    require_node,
-    unavailable,
-)
+from tests.integration import node_boot
+from tests.integration.targets import bearer_headers, mint_admin_token
 
 pytestmark = pytest.mark.destructive
 
-NODE = 0
-
-# The nsec the compose stack seeds node-a with (compose.yml default). The node
-# persists secrets at rest, so this exact bech32 string must NOT survive in the
-# DB once #553 encrypts it. Mirror the compose default; an override flows through
-# the same env var.
-NODE_NSEC = os.environ.get(
-    "NODE_A_NSEC",
-    "nsec1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsmhltgl",
-)
-
-# A valid 64-char hex private key — accepted by the node's nsec parser exactly as
-# bootstrap accepts one — used to exercise the rotation endpoint.
+ADMIN_PW = "at-rest-admin-pw"
+# The nsec the node is seeded with via env. The node stores secrets verbatim (only
+# ``.strip()``, no bech32<->hex normalization), so this exact string must NOT survive
+# in the DB once #553 encrypts it.
+SEED_NSEC = "nsec1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsmhltgl"
+# A valid 64-char hex private key the node's nsec parser accepts like a bech32 nsec.
+# After PATCH /admin/api/nsec this is the node's *live* nsec (stored verbatim), so it
+# too must be absent from disk — the check that guards the rotated identity.
 ROTATE_NSEC_HEX = "1" * 64
 
-# routstr-testing repo root (the docker-compose project dir), for `docker compose cp`.
-_REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+
+@pytest.fixture(autouse=True)
+def _local_docker() -> None:
+    node_boot.require_local_docker()
 
 
-@pytest.fixture(scope="module", autouse=True)
-def _require_stack() -> None:
-    require_node(NODE)
-
-
-def _admin_headers() -> dict[str, str]:
-    """Authenticate with the node's admin password; obtaining a token proves the
-    env-seeded password still logs in after the migration to the hashed store."""
-    token = admin_token(NODE)
-    if not token:
-        unavailable(
-            f"could not obtain an admin token for node {NODE} "
-            f"(login with the env admin password failed)"
-        )
-    return {"Authorization": f"Bearer {token}"}
+def _seed_env() -> dict[str, str]:
+    """A node booted with a known admin password and nsec supplied via env."""
+    return {
+        **node_boot.base_node_env(),
+        "ROUTSTR_SECRET_KEY": node_boot.COMPOSE_SECRET_KEY,
+        "ADMIN_PASSWORD": ADMIN_PW,
+        "NSEC": SEED_NSEC,
+    }
 
 
 def test_admin_password_is_not_a_settings_field() -> None:
@@ -89,9 +70,17 @@ def test_admin_password_is_not_a_settings_field() -> None:
     must therefore not carry an ``admin_password`` key at all (a node that still
     exposes it — redacted or not — is keeping the password as blob config).
     """
-    headers = _admin_headers()
-    with httpx.Client(base_url=node_api_url(NODE), timeout=15) as client:
-        resp = client.get("/admin/api/settings", headers=headers)
+    with node_boot.throwaway_volume() as vol, node_boot.serving_node(
+        _seed_env(), volume=vol
+    ) as node:
+        token = mint_admin_token(node.base_url, ADMIN_PW)
+        assert token, (
+            "the env-seeded admin password must log in — proving it was hashed into "
+            "the Secret store at boot, not broken by the migration"
+        )
+        resp = httpx.get(
+            f"{node.base_url}/admin/api/settings", headers=bearer_headers(token), timeout=15
+        )
     assert resp.status_code == 200, (
         f"GET /admin/api/settings failed: HTTP {resp.status_code}: {resp.text[:300]}"
     )
@@ -110,10 +99,16 @@ def test_nsec_rotation_endpoint_derives_npub() -> None:
     (PATCH /admin/api/nsec), not a field smuggled through the general settings
     PATCH (which strips it). A 404/405 means that write path is missing.
     """
-    headers = _admin_headers()
-    with httpx.Client(base_url=node_api_url(NODE), timeout=15) as client:
-        resp = client.patch(
-            "/admin/api/nsec", json={"nsec": ROTATE_NSEC_HEX}, headers=headers
+    with node_boot.throwaway_volume() as vol, node_boot.serving_node(
+        _seed_env(), volume=vol
+    ) as node:
+        token = mint_admin_token(node.base_url, ADMIN_PW)
+        assert token, "the env-seeded admin password must log in"
+        resp = httpx.patch(
+            f"{node.base_url}/admin/api/nsec",
+            json={"nsec": ROTATE_NSEC_HEX},
+            headers=bearer_headers(token),
+            timeout=15,
         )
     assert resp.status_code == 200, (
         "PATCH /admin/api/nsec should rotate the node's Nostr identity (200) — a "
@@ -136,26 +131,36 @@ def test_no_plaintext_secret_in_node_database() -> None:
     The settings blob is written lazily (a fresh node leaves it empty), so a bare
     "grep the DB" would pass vacuously on a node that *would* persist secrets the
     moment the blob is touched. We therefore first force a settings persist with a
-    harmless edit, assert the probe actually landed on disk (so the secret-absence
-    check is meaningful, not vacuous), then assert the raw DB bytes contain neither
-    the plaintext admin password nor the bech32 nsec. A node that keeps secrets in
-    the settings blob (pre-#553) writes them alongside the probe and fails here.
+    harmless edit, then rotate the identity (so the check also covers the *live*
+    secret after a rotation, not only the env seed), assert the probe actually
+    landed on disk (so the secret-absence check is meaningful, not vacuous), then
+    assert the raw DB bytes contain none of the plaintext secrets. A node that keeps
+    secrets in the settings blob (pre-#553) writes them alongside the probe and
+    fails here.
     """
-    if shutil.which("docker") is None:
-        unavailable("docker CLI not available to inspect the node DB at rest")
-
-    headers = _admin_headers()
     probe = "at-rest-probe-node-name"
-    with httpx.Client(base_url=node_api_url(NODE), timeout=15) as client:
-        resp = client.patch(
-            "/admin/api/settings", json={"name": probe}, headers=headers
-        )
-    assert resp.status_code == 200, (
-        f"settings PATCH (to force a blob persist) failed: HTTP {resp.status_code}: "
-        f"{resp.text[:300]}"
-    )
-
-    db_bytes = _copy_node_db()
+    with node_boot.throwaway_volume() as vol, node_boot.serving_node(
+        _seed_env(), volume=vol
+    ) as node:
+        token = mint_admin_token(node.base_url, ADMIN_PW)
+        assert token, "the env-seeded admin password must log in"
+        headers = bearer_headers(token)
+        with httpx.Client(base_url=node.base_url, timeout=15) as client:
+            resp = client.patch(
+                "/admin/api/settings", json={"name": probe}, headers=headers
+            )
+            assert resp.status_code == 200, (
+                "settings PATCH (to force a blob persist) failed: "
+                f"HTTP {resp.status_code}: {resp.text[:300]}"
+            )
+            resp = client.patch(
+                "/admin/api/nsec", json={"nsec": ROTATE_NSEC_HEX}, headers=headers
+            )
+            assert resp.status_code == 200, (
+                "nsec rotation (to make ROTATE_NSEC_HEX the live secret) failed: "
+                f"HTTP {resp.status_code}: {resp.text[:300]}"
+            )
+        db_bytes = node_boot.copy_db(node.cid)
 
     # Guard against a vacuous pass: the probe must have been persisted, proving a
     # settings blob was actually written to disk for the secret-absence check to mean
@@ -166,59 +171,18 @@ def test_no_plaintext_secret_in_node_database() -> None:
         "path changed; pick a field that actually writes the blob"
     )
 
-    assert ADMIN_PASSWORD.encode() not in db_bytes, (
+    assert ADMIN_PW.encode() not in db_bytes, (
         "the plaintext admin password is present in the node's on-disk database — "
         "it must be stored only as a one-way scrypt hash in the Secret store, never "
         "in the settings blob"
     )
-    assert NODE_NSEC.encode() not in db_bytes, (
-        "the plaintext nsec is present in the node's on-disk database — the Nostr "
-        "identity must be Fernet-encrypted in the Secret store, not kept in the "
-        "settings blob"
+    assert SEED_NSEC.encode() not in db_bytes, (
+        "the seeded plaintext nsec is present in the node's on-disk database — the "
+        "Nostr identity must be Fernet-encrypted in the Secret store, not kept in "
+        "the settings blob"
     )
-
-
-def _copy_node_db() -> bytes:
-    """Copy node-a's live SQLite state off the container for at-rest inspection.
-
-    Returns the concatenated bytes of the main DB file AND its write-ahead-log
-    (``-wal``) sidecar: the node runs SQLite in WAL mode, so a freshly committed
-    row lives in ``node-a.db-wal`` until it is checkpointed into ``node-a.db``.
-    Copying only the main file would miss recent writes and report a misleadingly
-    "clean" database. The ``-wal`` may be absent (already checkpointed) — that's
-    fine, we just inspect whatever is present.
-
-    Uses `docker compose cp` from the project root. Under the orchestrator
-    (SERVICES_REQUIRED=1) failing to read the main DB is a real failure; ad hoc it
-    skips.
-    """
-    if is_remote():
-        unavailable("cannot inspect a remote node's disk for plaintext secrets")
-
-    dest_dir = _REPO_ROOT / "logs"
-    dest_dir.mkdir(parents=True, exist_ok=True)
-
-    blobs: list[bytes] = []
-    for suffix, required in (("", True), ("-wal", False)):
-        src = f"node-a:/data/node-a.db{suffix}"
-        dest = dest_dir / f"node-a-at-rest.db{suffix}"
-        dest.unlink(missing_ok=True)
-        proc = subprocess.run(
-            ["docker", "compose", "cp", src, str(dest)],
-            cwd=str(_REPO_ROOT),
-            capture_output=True,
-            text=True,
-        )
-        if proc.returncode != 0 or not dest.exists():
-            if required:
-                unavailable(
-                    "could not copy node-a DB for at-rest inspection: "
-                    f"{(proc.stderr or proc.stdout)[:300]}"
-                )
-            continue
-        try:
-            blobs.append(dest.read_bytes())
-        finally:
-            dest.unlink(missing_ok=True)
-
-    return b"".join(blobs)
+    assert ROTATE_NSEC_HEX.encode() not in db_bytes, (
+        "the rotated plaintext nsec is present in the node's on-disk database — "
+        "after PATCH /admin/api/nsec the node's live Nostr identity is this value, "
+        "and it must be Fernet-encrypted in the Secret store, not persisted verbatim"
+    )
