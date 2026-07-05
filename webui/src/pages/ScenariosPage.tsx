@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Editor from '@monaco-editor/react';
 import { api } from '@/lib/api';
 import { ScenarioDetail, ScenarioSummary } from '@/lib/types';
 import { RunTokenModal } from '@/components/RunTokenModal';
 
 export function ScenariosPage() {
+  const navigate = useNavigate();
   const [scenarios, setScenarios] = useState<ScenarioSummary[]>([]);
   const [scenarioDetail, setScenarioDetail] = useState<ScenarioDetail | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -13,11 +15,16 @@ export function ScenariosPage() {
   const [saving, setSaving] = useState(false);
   const [newScenarioId, setNewScenarioId] = useState('');
   const [runOpen, setRunOpen] = useState(false);
+  const [runAllOpen, setRunAllOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const selected = useMemo(
     () => scenarios.find((scenario) => scenario.id === selectedId) ?? null,
     [scenarios, selectedId]
+  );
+  const totalEstimatedCostSats = useMemo(
+    () => scenarios.reduce((sum, scenario) => sum + scenario.expected_cost_sats, 0),
+    [scenarios]
   );
 
   useEffect(() => {
@@ -85,6 +92,13 @@ export function ScenariosPage() {
       <div className='mb-4 flex items-center justify-between'>
         <h2 className='text-lg font-semibold'>Scenarios</h2>
         <div className='flex items-center gap-2'>
+          <button
+            className='rounded-md border border-slate-300 px-3 py-2 text-sm disabled:opacity-50'
+            disabled={loading || scenarios.length === 0}
+            onClick={() => setRunAllOpen(true)}
+          >
+            Run all
+          </button>
           <input
             value={newScenarioId}
             onChange={(event) => setNewScenarioId(event.target.value)}
@@ -162,11 +176,34 @@ export function ScenariosPage() {
       </div>
 
       <RunTokenModal
+        title='Run all scenarios'
+        open={runAllOpen}
+        scenarioName={`${scenarios.length} scenarios`}
+        estimatedCostSats={totalEstimatedCostSats}
+        estimatedUpstreamCostUsd={scenarios.reduce(
+          (sum, scenario) => sum + scenario.estimated_upstream_cost_usd,
+          0
+        )}
+        scenarioTargetProfile='remote'
+        scenarioUpstreamProfile='mock'
+        onClose={() => setRunAllOpen(false)}
+        onSubmit={async (req) => {
+          setError(null);
+          for (const scenario of scenarios) {
+            await api.runScenario(scenario.id, req);
+          }
+          setRunAllOpen(false);
+          navigate('/runs');
+        }}
+      />
+
+      <RunTokenModal
         title='Run scenario'
         open={runOpen}
         scenarioName={selected?.name}
         estimatedCostSats={selected?.expected_cost_sats}
         estimatedUpstreamCostUsd={selected?.estimated_upstream_cost_usd}
+        scenarioTargetProfile={selected?.target_profile}
         scenarioUpstreamProfile={selected?.upstream_profile}
         onClose={() => setRunOpen(false)}
         onSubmit={async (req) => {

@@ -1,0 +1,20 @@
+id: remote_all
+name: Remote node full harness
+description: >
+  Runs the full routstr-testing node-facing harness from the Web UI against a
+  deployed Routstr node. Choose target_profile=remote in the Run modal, paste
+  one or more node URLs, and paste a funded Cashu token. The orchestrator passes
+  that token to tests as NODE_A_API_KEY and X_CASHU_TOKENS so paid request tests
+  can authenticate directly against the remote node. Tests that need extra admin
+  access or multiple one-shot X-Cashu tokens will skip when those credentials are
+  not supplied.
+services_required: false
+target_profile: remote
+upstream_profile: mock
+selection:
+  paths:
+    - tests/integration
+parameters: {}
+expected_cost_sats: 5
+estimated_upstream_cost_usd: 0.0
+timeout_seconds: 600

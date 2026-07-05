@@ -24,6 +24,7 @@ class ScenarioSummary(BaseModel):
     name: str
     description: str = ""
     expected_cost_sats: int = 0
+    target_profile: str = "local"
     # ROU-153 — surfaced so the Run modal can show the USD cost preview and
     # the Scenarios list can flag real-upstream scenarios.
     upstream_profile: str = "mock"

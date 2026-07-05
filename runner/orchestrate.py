@@ -595,6 +595,15 @@ def orchestrate(
             )
         for idx, admin_token in enumerate(remote_admin_tokens or []):
             scenario_env[f"REMOTE_NODE_ADMIN_TOKEN_{idx}"] = admin_token
+        if token:
+            # UI-submitted Cashu is primarily used to top up local routstrd,
+            # but remote/direct node tests also accept raw Cashu as auth.
+            # Export it under their conventional env names without clobbering
+            # operator-provided values already present in the server env.
+            if not os.environ.get("NODE_A_API_KEY"):
+                scenario_env["NODE_A_API_KEY"] = token
+            if not os.environ.get("X_CASHU_TOKENS"):
+                scenario_env["X_CASHU_TOKENS"] = token
         if not token_ok:
             scenario_env["TOPUP_FAILED"] = "1"
         # Paid tests append their precise spend (millisats) here; summed below
