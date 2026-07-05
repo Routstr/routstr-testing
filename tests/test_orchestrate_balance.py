@@ -251,7 +251,7 @@ def test_orchestrate_remote_profile_skips_compose_and_persists_urls(
     db_path = tmp_path / "runs.db"
     run_id = orch_mod.orchestrate(
         scenario_id="remote_smoke",
-        token=None,
+        token="cashu-test-token",
         db_path=db_path,
         scenarios_dir=scenarios_dir,
         compose_file=tmp_path / "compose.yml",
@@ -278,6 +278,8 @@ def test_orchestrate_remote_profile_skips_compose_and_persists_urls(
     )
     assert seen_env["REMOTE_NODE_ADMIN_TOKEN_0"] == "secret-1"
     assert seen_env["REMOTE_NODE_ADMIN_TOKEN_1"] == "secret-2"
+    assert seen_env["NODE_A_API_KEY"] == "cashu-test-token"
+    assert seen_env["X_CASHU_TOKENS"] == "cashu-test-token"
 
 
 def test_orchestrate_remote_profile_requires_urls(tmp_path, monkeypatch):

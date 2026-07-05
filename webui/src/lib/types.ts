@@ -7,6 +7,7 @@ export interface ScenarioSummary {
   name: string;
   description: string;
   expected_cost_sats: number;
+  target_profile: TargetProfile;
   upstream_profile: string;
   estimated_upstream_cost_usd: number;
   stats: Record<string, unknown>;
