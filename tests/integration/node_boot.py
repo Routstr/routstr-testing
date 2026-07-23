@@ -2,9 +2,10 @@
 
 The standing compose ``node-a`` is one long-lived container with every secret
 pre-supplied, so it cannot exercise the BOOT-TIME secret behaviours #553 adds:
-refusing to start without ``ROUTSTR_SECRET_KEY``, generating + logging a
-first-run admin password, bricking on a key change, and recovering an encrypted
-nsec on a later boot after ``NSEC`` has left the env. Those need ephemeral nodes
+provisioning + persisting a Fernet key when ``ROUTSTR_SECRET_KEY`` is unset,
+generating + logging a first-run admin password, bricking on a key change, and
+recovering an encrypted nsec on a later boot after ``NSEC`` has left the env.
+Those need ephemeral nodes
 booted with tailored env — two of them across a *pair* of boots sharing one
 volume.
 

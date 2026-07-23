@@ -4,8 +4,11 @@ Whole-system proof of the secret behaviours that only show up across a real
 container *boot* — the things the standing single-boot stack (and the in-repo
 unit/integration suite) structurally cannot exercise:
 
-  * a node carrying a Nostr identity refuses to start without
-    ``ROUTSTR_SECRET_KEY`` and prints the key-generation command (issue step 2);
+  * a node carrying a Nostr identity but no ``ROUTSTR_SECRET_KEY`` PROVISIONS
+    one — generates a Fernet key, persists it beside the DB, warns once — and
+    boots with the nsec still encrypted at rest, the identity surviving a later
+    keyless reboot from the persisted key (issue step 2; key custody is flexible,
+    encryption at rest is not);
   * a fresh node with no admin password GENERATES one, hashes it into the Secret
     store, and logs it once with the admin URL — and that logged password logs in
     (issue step 4 / bootstrap branch 3);
@@ -48,29 +51,61 @@ def _local_docker() -> None:
     node_boot.require_local_docker()
 
 
-def test_node_refuses_to_boot_without_secret_key() -> None:
-    """A node with a Nostr identity must fail fast when ROUTSTR_SECRET_KEY is unset.
+def test_node_without_secret_key_provisions_and_persists_one() -> None:
+    """A node with a Nostr identity but no ROUTSTR_SECRET_KEY provisions its own key.
 
-    ``ROUTSTR_SECRET_KEY`` is required to encrypt the nsec at rest; #553 makes its
-    absence a hard boot failure (no "secrets disabled" fallback), and the error
-    must hand the operator the generation command. Pre-#553 the node ignores the
-    var and boots anyway — that is the RED this discriminates.
+    #553's key custody is flexible while encryption at rest is not: a missing
+    ``ROUTSTR_SECRET_KEY`` is PROVISIONED, not fatal. The node generates a Fernet
+    key, persists it beside the SQLite DB (so it rides the same volume), prints a
+    one-time back-up notice, and boots — with the nsec still encrypted at rest,
+    never plaintext. Because the key was persisted, the identity survives a later
+    boot that still supplies no key (the key file is read back). Pre-2026-07 the
+    node instead refused to boot on a missing key — that inversion is the RED this
+    discriminates.
     """
-    env = {**node_boot.base_node_env(), "NSEC": SEED_NSEC, "ADMIN_PASSWORD": ADMIN_PW}
-    # No ROUTSTR_SECRET_KEY on purpose.
+    base = node_boot.base_node_env()
+    # No ROUTSTR_SECRET_KEY on purpose — the node must provision one.
+    seed = {**base, "NSEC": SEED_NSEC, "ADMIN_PASSWORD": ADMIN_PW}
     with node_boot.throwaway_volume() as vol:
-        result = node_boot.boot_until_settled(env, volume=vol, timeout=50)
+        # Boot 1: keyless -> generate + persist a key, warn once, encrypt the nsec.
+        with node_boot.serving_node(seed, volume=vol) as node1:
+            logs = node1.logs()
+            assert "No ROUTSTR_SECRET_KEY was set" in logs, (
+                "a keyless boot must announce it generated its own key:\n"
+                f"{logs[-1500:]}"
+            )
+            assert "BACK UP THIS FILE" in logs, (
+                "the generated-key notice must tell the operator to back it up "
+                f"(the key is unrecoverable if lost):\n{logs[-1500:]}"
+            )
+            npub1 = httpx.get(f"{node1.base_url}/v1/info", timeout=15).json().get("npub")
+            assert npub1 and str(npub1).startswith("npub1"), f"boot 1 npub: {npub1!r}"
+            db_bytes = node_boot.copy_db(node1.cid)
 
-    assert result.exited and result.exit_code != 0, (
-        "node booted without ROUTSTR_SECRET_KEY — #553 requires it to fail fast.\n"
-        f"{result.logs[-1200:]}"
-    )
-    assert "ROUTSTR_SECRET_KEY" in result.logs, (
-        f"fail-fast must name the missing key:\n{result.logs[-1200:]}"
-    )
-    assert "Fernet.generate_key" in result.logs, (
-        f"fail-fast must print the key-generation command:\n{result.logs[-1200:]}"
-    )
+        # Positive control against a vacuous pass: the encrypted nsec ciphertext
+        # (``fernet:v1:`` prefix) must actually be on disk, so the plaintext-absence
+        # check below is meaningful rather than passing on an empty/partial copy.
+        assert b"fernet:v1:" in db_bytes, (
+            "no fernet ciphertext found on disk — the secret store was not persisted "
+            "to the copied DB, so the plaintext-absence check would be vacuous"
+        )
+        assert SEED_NSEC.encode() not in db_bytes, (
+            "the seeded nsec is on disk in plaintext — a self-provisioned key must "
+            "still encrypt secrets at rest, not skip encryption when no key was set"
+        )
+
+        # Boot 2: STILL no key in env -> the node must read back the persisted key
+        # file and decrypt the identity, proving the generated key was persisted
+        # (not held only in memory and lost with the process).
+        with node_boot.serving_node(
+            {**base, "ADMIN_PASSWORD": ADMIN_PW}, volume=vol
+        ) as node2:
+            npub2 = httpx.get(f"{node2.base_url}/v1/info", timeout=15).json().get("npub")
+            assert npub2 == npub1, (
+                "the self-provisioned key was not persisted: the identity changed "
+                f"across a keyless reboot ({npub1!r} -> {npub2!r}), so the encrypted "
+                "nsec could not be decrypted from the same volume"
+            )
 
 
 def test_first_run_generates_and_logs_admin_password() -> None:
