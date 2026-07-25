@@ -86,12 +86,27 @@ def admin_token(i: int = 0) -> str | None:
         return env_tok
     if is_remote():
         return None  # no token supplied for this remote node
+    return mint_admin_token(node_api_url(i), ADMIN_PASSWORD)
+
+
+def mint_admin_token(base_url: str, password: str) -> str | None:
+    """Log in at ``base_url`` and return an admin token, or None on any failure.
+
+    The single home for the ``POST /admin/api/login`` contract (payload shape,
+    timeout, token extraction, error swallowing) — shared by the standing-node
+    ``admin_token`` above and the ephemeral-node boot harness in ``node_boot``.
+    """
     try:
-        with httpx.Client(base_url=node_api_url(i), timeout=10) as c:
-            r = c.post("/admin/api/login", json={"password": ADMIN_PASSWORD})
+        with httpx.Client(base_url=base_url, timeout=10) as c:
+            r = c.post("/admin/api/login", json={"password": password})
             return r.json().get("token") if r.status_code == 200 else None
     except (httpx.HTTPError, ValueError):
         return None
+
+
+def bearer_headers(token: str) -> dict[str, str]:
+    """Authorization header for an admin token minted by ``mint_admin_token``."""
+    return {"Authorization": f"Bearer {token}"}
 
 
 def node_reachable(i: int = 0) -> bool:

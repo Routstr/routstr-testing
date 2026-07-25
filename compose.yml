@@ -185,6 +185,11 @@ services:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - OPENROUTER_REFERER=${OPENROUTER_REFERER:-https://routstr-testing.local}
       - ADMIN_PASSWORD=${NODE_A_ADMIN_PASSWORD:-test-admin-pw}
+      # Mandatory for #553 secret-at-rest: the node refuses to boot without it and
+      # uses it to Fernet-encrypt the stored nsec. A fixed key keeps the encrypted
+      # blob readable across restarts within the volume's lifetime. Older nodes that
+      # don't read this var simply ignore it.
+      - ROUTSTR_SECRET_KEY=${NODE_A_ROUTSTR_SECRET_KEY:-W5PvCGEnbMTde00OFubyfhPPO2-f6aQP5ullyqoBfRQ=}
       - NAME=NodeA
       - DESCRIPTION=Test node A
       - NPUB=${NODE_A_NPUB:-npub10xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqpkge6d}
@@ -234,6 +239,8 @@ services:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - OPENROUTER_REFERER=${OPENROUTER_REFERER:-https://routstr-testing.local}
       - ADMIN_PASSWORD=${NODE_B_ADMIN_PASSWORD:-test-admin-pw}
+      # See node-a: mandatory for #553 secret-at-rest, ignored by older nodes.
+      - ROUTSTR_SECRET_KEY=${NODE_B_ROUTSTR_SECRET_KEY:-W5PvCGEnbMTde00OFubyfhPPO2-f6aQP5ullyqoBfRQ=}
       - NAME=NodeB
       - DESCRIPTION=Test node B
       - NPUB=${NODE_B_NPUB:-npub1ccz8l9zpa47k6vz9gphftsrumpw80rjt3nhnefat4symjhrsnmjs38mnyd}
