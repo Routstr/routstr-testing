@@ -1,0 +1,142 @@
+name: CI
+
+# Two-lane CI for the Routstr e2e harness (see docs/ci.md):
+#
+#   pr      — fast, no-Docker, no-funds. Runs on every PR + push to main.
+#             Gates on: ruff + mypy(runner) + the unit/mock pytest suite
+#             + the orchestrator money-path *pipeline* guard (smoke passes /
+#             smoke_fail fails -> non-zero exit). Uses only local nutshell
+#             FakeWallet-free mock primitives; never touches real sats or a
+#             real mint.
+#
+#   nightly — Docker lane (scheduled + manual). Brings up the compose
+#             topology and runs the services_required money-path scenarios
+#             (foreign-mint swap + retry once Routstr/routstr-testing#1 merges)
+#             against local nutshell FakeWallet mints — real Cashu crypto,
+#             zero real sats. Stubbed here; enable once PR #1 lands.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # 03:17 UTC nightly — odd minute to dodge the top-of-hour scheduler rush.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      run_nightly:
+        description: "Force the Docker nightly lane on a manual run"
+        type: boolean
+        default: false
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────
+  # Fast PR lane: no Docker, no funds. This is the gate on every PR.
+  # ──────────────────────────────────────────────────────────────────────
+  pr:
+    name: pr (no-docker / mock money-path)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync env (incl. dev tools)
+        run: uv sync --group dev --frozen
+
+      - name: Lint (ruff)
+        run: uv run ruff check .
+
+      - name: Type-check money-path package (mypy runner/)
+        run: uv run mypy
+
+      - name: Unit + mock suite (no Docker, no funds)
+        # The full pytest suite. Service-backed integration tests guard
+        # themselves and SKIP without their env (no REMOTE_NODE_URLS /
+        # X_CASHU_TOKENS / funded daemon), so nothing here needs Docker or
+        # real sats. SCENARIO_ID mirrors what the orchestrator exports so the
+        # smoke env-propagation assertion holds; test_smoke_fail.py is the
+        # deliberately-red negative control and is exercised via the
+        # orchestrator guard below, not collected directly.
+        env:
+          SCENARIO_ID: smoke
+        run: uv run pytest tests --deselect tests/test_smoke_fail.py -q
+
+      - name: Money-path pipeline guard — smoke MUST pass (exit 0)
+        # Drives the no-services smoke scenario through the orchestrator and
+        # asserts the *process exit code* is 0. Proves the runner -> pytest ->
+        # junit -> sqlite pipeline is intact.
+        env:
+          SKIP_SYNC: "1"
+        run: uv run python -m runner.orchestrate --scenario smoke --token placeholder
+
+      - name: Money-path pipeline guard — smoke_fail MUST fail (non-zero)
+        # The anti-silent-pass check: a scenario whose tests fail has to make
+        # the orchestrator exit non-zero, or the nightly money-path lane would
+        # be green while swap/refund logic is red. We invert the exit code:
+        # this step fails the build if the orchestrator wrongly returns 0.
+        env:
+          SKIP_SYNC: "1"
+        run: |
+          if uv run python -m runner.orchestrate --scenario smoke_fail --token placeholder; then
+            echo "::error::orchestrator exited 0 for a FAILED scenario — the money-path CI guard is a silent-pass"
+            exit 1
+          else
+            echo "orchestrator correctly returned non-zero for smoke_fail"
+          fi
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Nightly Docker lane (STUB). Real Cashu crypto via local nutshell mints,
+  # zero real sats. Enable the scenario steps once Routstr/routstr-testing#1
+  # (foreign-mint swap + retry) merges to main.
+  # ──────────────────────────────────────────────────────────────────────
+  nightly:
+    name: nightly (docker money-path)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # Only on the schedule or an explicit manual opt-in — never on PRs.
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.run_nightly)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync env
+        run: uv sync --frozen
+
+      - name: Bring up compose topology (vendor refs default to main)
+        run: make up
+
+      # --- Money-path scenarios (enable after Routstr/routstr-testing#1 merges) ---
+      # PR #1 adds two services_required scenarios that exercise routstr-core's
+      # swap_to_primary_mint fee handling against local nutshell FakeWallet
+      # mints + a fault-proxy. Until it lands, these steps are intentionally
+      # inert so the lane is wired but does not reference files not yet on main.
+      #
+      #   - name: Foreign-mint swap (covers core#549/#468 fund-loss class)
+      #     env: { SKIP_SYNC: "1", KEEP_UP: "1" }
+      #     run: uv run python -m runner.orchestrate --scenario swap_foreign_mint --token placeholder
+      #
+      #   - name: Foreign-mint swap retry
+      #     # Pin ROUTSTR_CORE_REF=refs/pull/549/head until core#549 merges;
+      #     # on core main this asserts the no-retry 400/abort path.
+      #     env: { SKIP_SYNC: "1", KEEP_UP: "1", ROUTSTR_CORE_REF: "refs/pull/549/head" }
+      #     run: uv run python -m runner.orchestrate --scenario swap_foreign_mint_retry --token placeholder
+
+      - name: Nightly stub notice
+        run: echo "Docker topology is up. Money-path scenario steps are stubbed until Routstr/routstr-testing#1 merges."
+
+      - name: Tear down
+        if: always()
+        run: make down

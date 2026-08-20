@@ -116,7 +116,6 @@ def test_remote_plus_real_no_provider_key_needed():
 
 
 def test_price_usage_absent_is_none(tmp_path: Path):
-    models = PROVIDERS_DIR / "providers" / "models"  # wrong path on purpose
     assert price_usage_file(tmp_path / USAGE_FILENAME, tmp_path / "x.json") is None
 
 

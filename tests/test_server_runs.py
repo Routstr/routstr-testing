@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import select
 
 from runner.models import Run, TestResult, get_engine, get_session
 from server.config import ServerConfig

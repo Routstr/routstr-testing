@@ -14,7 +14,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from sqlmodel import select
 
 from runner import orchestrate as orch_mod
 from runner.models import Run, get_engine, get_session
