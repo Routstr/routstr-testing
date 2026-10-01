@@ -3,7 +3,9 @@
 The primary mint is the fault proxy. It returns HTTP 429 for mint-quote requests,
 forcing routstr-core to create the invoice on the secondary trusted mint. The
 scenario then follows the invoice through settlement and verifies that a top-up
-for the resulting key stays on its backing mint instead of mixing collateral.
+for the resulting key skips the primary while the create's 429 rate-limit
+cooldown is still active (top-ups are not pinned to a backing mint; they walk
+the same fallback candidates, and the cooldown persists on the per-mint guard).
 """
 from __future__ import annotations
 
@@ -106,7 +108,7 @@ def _create_invoice(amount: int, *, purpose: str, api_key: str | None = None) ->
     return response.json()
 
 
-def test_429_fallback_persists_mint_and_topup_stays_on_backing_mint() -> None:
+def test_429_fallback_persists_mint_and_topup_respects_cooldown() -> None:
     reset = httpx.post(
         f"{PROXY_CTL}/__proxy__/reset",
         params={"faults": 10, "kind": "mint_quote_429", "retry_after": "0"},
@@ -133,8 +135,7 @@ def test_429_fallback_persists_mint_and_topup_stays_on_backing_mint() -> None:
     ).json()["mint_quote_attempts"]
 
     assert attempts_after_topup == attempts_before_topup, (
-        "top-up retried the rate-limited primary instead of staying on the "
-        "API key's backing mint"
+        "top-up retried the primary during its 429 rate-limit cooldown"
     )
     assert _invoice_mint_url(topup["invoice_id"]) == SECONDARY_MINT
     topup_paid = _wait_paid(topup["invoice_id"])

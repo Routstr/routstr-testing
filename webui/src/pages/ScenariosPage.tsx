@@ -178,7 +178,7 @@ export function ScenariosPage() {
       <RunTokenModal
         title='Run all scenarios'
         open={runAllOpen}
-        scenarioName={`${scenarios.length} scenarios`}
+        scenarioName={`${scenarios.length} scenarios (only those matching the chosen target/upstream profile run)`}
         estimatedCostSats={totalEstimatedCostSats}
         estimatedUpstreamCostUsd={scenarios.reduce(
           (sum, scenario) => sum + scenario.estimated_upstream_cost_usd,
@@ -189,7 +189,21 @@ export function ScenariosPage() {
         onClose={() => setRunAllOpen(false)}
         onSubmit={async (req) => {
           setError(null);
-          for (const scenario of scenarios) {
+          // Only run scenarios declared for the chosen profiles: forcing a
+          // local services_required scenario onto remote skips vacuously,
+          // and a real-upstream scenario must not be fired by a bulk run.
+          const upstreamProfile = req.upstreamProfile || 'mock';
+          const matching = scenarios.filter(
+            (scenario) =>
+              scenario.target_profile === req.targetProfile &&
+              scenario.upstream_profile === upstreamProfile
+          );
+          if (matching.length === 0) {
+            throw new Error(
+              `No scenarios declare target_profile=${req.targetProfile} and upstream_profile=${upstreamProfile}`
+            );
+          }
+          for (const scenario of matching) {
             await api.runScenario(scenario.id, req);
           }
           setRunAllOpen(false);
