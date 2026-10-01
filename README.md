@@ -25,6 +25,7 @@ Set in `.env` (all gitignored):
 - `CASHU_MINTS` — the mint the token is from (e.g. `https://mint.chorus.community`). Both nodes must trust it.
 - `OPENROUTER_API_KEY` (+ optional `OPENROUTER_REFERER`) — to point the nodes at a real upstream. The node auto-seeds an `openrouter` provider at startup when this is present.
 - `NODE_A_ADMIN_PASSWORD` / `NODE_B_ADMIN_PASSWORD` — admin password per node (default `test-admin-pw`), needed for `routstr-cli` config.
+- `NODE_A_ROUTSTR_SECRET_KEY` / `NODE_B_ROUTSTR_SECRET_KEY` — Fernet key each node uses to encrypt secrets at rest (routstr-core #553). A committed default is baked into `compose.yml`; override only if you want a per-run key (must be a urlsafe-base64 32-byte key from `Fernet.generate_key()`).
 
 ### 3. Start services
 
