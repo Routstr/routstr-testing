@@ -1,4 +1,4 @@
-.PHONY: sync up down test logs orchestrate smoke dump-logs server server-test webui-build serve
+.PHONY: sync up down test logs orchestrate smoke dump-logs server server-test webui-build serve mint-rate-limit-fallback-test
 
 E2E_TIMEOUT ?= 60
 
@@ -35,6 +35,16 @@ down:
 	@echo "Stopping topology and removing volumes..."
 	docker compose down -v
 	@echo "Done."
+
+# Hermetic PR #597 scenario: primary mint returns 429, secondary mint settles.
+# Override ROUTSTR_CORE_REF to test an unmerged branch/PR, for example:
+#   ROUTSTR_CORE_REF=refs/pull/597/head make mint-rate-limit-fallback-test
+mint-rate-limit-fallback-test: sync
+	CASHU_MINTS=http://fault-proxy:3340,http://primary-mint:3338,http://fee-mint:3338 \
+		docker compose up -d --build relay mock-openai fault-mint fault-proxy primary-mint fee-mint node-a
+	@bash scripts/wait_for.sh node-a http://localhost:8001/v1/info $(E2E_TIMEOUT)
+	@bash scripts/wait_for.sh fault-proxy http://localhost:3340/__proxy__/stats $(E2E_TIMEOUT)
+	.venv/bin/pytest -q -s tests/integration/test_mint_rate_limit_fallback.py
 
 dump-logs:
 	@bash scripts/dump_logs.sh

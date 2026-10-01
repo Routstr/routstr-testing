@@ -16,6 +16,8 @@ interface Props {
   estimatedCostSats?: number;
   /** Scenario's declared real-upstream cost (USD) — drives the cost preview. */
   estimatedUpstreamCostUsd?: number;
+  /** Scenario's declared target_profile, used as the dropdown default. */
+  scenarioTargetProfile?: TargetProfile;
   /** Scenario's declared upstream_profile, used as the dropdown default. */
   scenarioUpstreamProfile?: string;
   onClose: () => void;
@@ -31,6 +33,7 @@ export function RunTokenModal({
   scenarioName,
   estimatedCostSats,
   estimatedUpstreamCostUsd,
+  scenarioTargetProfile,
   scenarioUpstreamProfile,
   onClose,
   onSubmit,
@@ -51,6 +54,7 @@ export function RunTokenModal({
 
   useEffect(() => {
     if (!open) return;
+    setTargetProfile(scenarioTargetProfile || 'local');
     setUpstreamProfile(scenarioUpstreamProfile || MOCK_UPSTREAM);
     let active = true;
     api
@@ -60,7 +64,7 @@ export function RunTokenModal({
     return () => {
       active = false;
     };
-  }, [open, scenarioUpstreamProfile]);
+  }, [open, scenarioTargetProfile, scenarioUpstreamProfile]);
 
   const parsedUrls = useMemo(
     () =>
